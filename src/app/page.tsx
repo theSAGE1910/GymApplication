@@ -17,6 +17,7 @@ import {
   ClipboardList,
   BarChart3,
   TrendingUp,
+  Calculator,
 } from 'lucide-react';
 
 interface DbExercise {
@@ -55,6 +56,16 @@ const EQUIPMENT_TYPES = [
   'OTHER',
 ];
 
+const STANDARD_PLATES = [
+  { weight: 25, color: 'bg-red-600 text-white h-24' },
+  { weight: 20, color: 'bg-blue-600 text-white h-24' },
+  { weight: 15, color: 'bg-amber-400 text-slate-950 h-20' },
+  { weight: 10, color: 'bg-emerald-500 text-slate-950 h-16' },
+  { weight: 5, color: 'bg-slate-100 text-slate-950 h-14' },
+  { weight: 2.5, color: 'bg-slate-700 text-white h-12' },
+  { weight: 1.25, color: 'bg-slate-500 text-white h-10' },
+];
+
 export default function HevyCloneApp() {
   const {
     isActive,
@@ -88,6 +99,9 @@ export default function HevyCloneApp() {
   const [showExerciseModal, setShowExerciseModal] = useState(false);
   const [showCreateExerciseModal, setShowCreateExerciseModal] = useState(false);
   const [showRoutineModal, setShowRoutineModal] = useState(false);
+  const [showPlateCalc, setShowPlateCalc] = useState(false);
+  const [plateCalcWeight, setPlateCalcWeight] = useState('100');
+  const [barWeight, setBarWeight] = useState(20);
   const [routinePickerMode, setRoutinePickerMode] = useState(false);
 
   // Custom Exercise Form State
@@ -172,6 +186,23 @@ export default function HevyCloneApp() {
     const remSec = sec % 60;
     return `${mins}:${remSec < 10 ? '0' : ''}${remSec}`;
   };
+
+  // Calculate plates per side for the Plate Calculator
+  const calculatePlatesPerSide = (targetTotal: number, barbell: number) => {
+    const platesPerSide: { weight: number; color: string }[] = [];
+    if (targetTotal <= barbell) return platesPerSide;
+    let remainingOneSide = (targetTotal - barbell) / 2;
+
+    for (const plate of STANDARD_PLATES) {
+      while (remainingOneSide >= plate.weight - 0.001) {
+        platesPerSide.push(plate);
+        remainingOneSide = Number((remainingOneSide - plate.weight).toFixed(2));
+      }
+    }
+    return platesPerSide;
+  };
+
+  const platesNeeded = calculatePlatesPerSide(parseFloat(plateCalcWeight) || 0, barWeight);
 
   const handleCreateCustomExercise = async () => {
     if (!customExName.trim()) return;
@@ -369,15 +400,26 @@ export default function HevyCloneApp() {
             <span className="font-bold text-lg tracking-tight">HEVY CLONE</span>
           </div>
 
-          {isActive && (
-              <button
-                  onClick={handleFinishWorkout}
-                  disabled={isSaving}
-                  className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold px-4 py-1.5 rounded-lg text-sm transition"
-              >
-                {isSaving ? 'Saving...' : 'Finish'}
-              </button>
-          )}
+          <div className="flex items-center gap-2">
+            <button
+                onClick={() => setShowPlateCalc(true)}
+                title="Barbell Plate Calculator"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 p-2 rounded-lg transition flex items-center gap-1.5 text-xs font-semibold"
+            >
+              <Calculator className="w-4 h-4 text-blue-400" />
+              <span className="hidden sm:inline">Plates</span>
+            </button>
+
+            {isActive && (
+                <button
+                    onClick={handleFinishWorkout}
+                    disabled={isSaving}
+                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold px-4 py-1.5 rounded-lg text-sm transition"
+                >
+                  {isSaving ? 'Saving...' : 'Finish'}
+                </button>
+            )}
+          </div>
         </header>
 
         <main className="max-w-2xl mx-auto p-4 space-y-6">
@@ -763,7 +805,7 @@ export default function HevyCloneApp() {
                                 {s.previousText || '—'}
                               </div>
 
-                              <div className="col-span-3">
+                              <div className="col-span-3 relative">
                                 <input
                                     type="number"
                                     inputMode="decimal"
@@ -902,6 +944,82 @@ export default function HevyCloneApp() {
                 </button>
               </div>
             </nav>
+        )}
+
+        {/* BARBELL PLATE CALCULATOR MODAL */}
+        {showPlateCalc && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg flex items-center gap-2">
+                    <Calculator className="w-5 h-5 text-blue-400" />
+                    Barbell Plate Calculator
+                  </h3>
+                  <button
+                      onClick={() => setShowPlateCalc(false)}
+                      className="p-1 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 font-semibold">Total Weight (kg)</label>
+                    <input
+                        type="number"
+                        value={plateCalcWeight}
+                        onChange={(e) => setPlateCalcWeight(e.target.value)}
+                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 font-semibold">Barbell Weight</label>
+                    <select
+                        value={barWeight}
+                        onChange={(e) => setBarWeight(Number(e.target.value))}
+                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value={20}>20 kg (Olympic)</option>
+                      <option value={15}>15 kg (Women&apos;s)</option>
+                      <option value={10}>10 kg (EZ Curl)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* VISUAL BARBELLSLEEVE */}
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <p className="text-xs text-slate-400 text-center font-semibold">
+                    Load on <span className="text-blue-400 underline">EACH SIDE</span> of the bar:
+                  </p>
+
+                  <div className="flex items-center justify-center min-h-[110px] gap-1 py-2">
+                    {/* Barbell shaft + collar */}
+                    <div className="w-10 h-3 bg-slate-500 rounded-l" />
+                    <div className="w-3 h-10 bg-slate-400 rounded-sm" />
+
+                    {platesNeeded.length === 0 ? (
+                        <span className="text-xs text-slate-500 pl-3">Just the empty bar!</span>
+                    ) : (
+                        platesNeeded.map((p, idx) => (
+                            <div
+                                key={idx}
+                                className={`${p.color} px-2 rounded flex items-center justify-center font-bold text-xs shadow-md`}
+                            >
+                              {p.weight}
+                            </div>
+                        ))
+                    )}
+                  </div>
+
+                  {platesNeeded.length > 0 && (
+                      <div className="text-center text-xs text-slate-300 font-semibold pt-1 border-t border-slate-800">
+                        Per side: {platesNeeded.map((p) => `${p.weight}kg`).join(' + ')}
+                      </div>
+                  )}
+                </div>
+              </div>
+            </div>
         )}
 
         {/* ROUTINE BUILDER MODAL */}
@@ -1135,13 +1253,7 @@ export default function HevyCloneApp() {
                         value={customExMuscle}
                         onChange={(e) => setCustomExMuscle(e.target.value)}
                         className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      {MUSCLE_GROUPS.map((m) => (
-                          <option key={m} value={m}>
-                            {m}
-                          </option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>
