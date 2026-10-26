@@ -8,11 +8,12 @@ import {
   Check,
   Trash2,
   Clock,
-  Trophy,
   X,
   Play,
   SkipForward,
   Calendar,
+  FolderPlus,
+  ClipboardList,
 } from 'lucide-react';
 
 interface DbExercise {
@@ -32,8 +33,10 @@ export default function HevyCloneApp() {
     restEndTime,
     exercises,
     startEmptyWorkout,
+    startWorkoutFromRoutine,
     updateWorkoutName,
     addExercise,
+    setExercisePreviousSets,
     removeExercise,
     addSet,
     removeSet,
@@ -46,22 +49,45 @@ export default function HevyCloneApp() {
 
   const [mounted, setMounted] = useState(false);
   const [dbExercises, setDbExercises] = useState<DbExercise[]>([]);
+  const [routines, setRoutines] = useState<any[]>([]);
   const [pastWorkouts, setPastWorkouts] = useState<any[]>([]);
+
+  // Modals
   const [showExerciseModal, setShowExerciseModal] = useState(false);
+  const [showRoutineModal, setShowRoutineModal] = useState(false);
+  const [routinePickerMode, setRoutinePickerMode] = useState(false);
+
+  // Routine Builder Draft State
+  const [draftRoutineName, setDraftRoutineName] = useState('');
+  const [draftRoutineExercises, setDraftRoutineExercises] = useState<
+      {
+        id: string;
+        exerciseId: string;
+        name: string;
+        sets: { weight: string; reps: string }[];
+      }[]
+  >([]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [elapsedSec, setElapsedSec] = useState(0);
   const [restRemainingSec, setRestRemainingSec] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Prevent hydration mismatch with localStorage persist
   useEffect(() => {
     setMounted(true);
     fetch('/api/exercises')
         .then((res) => res.json())
         .then((data) => Array.isArray(data) && setDbExercises(data));
 
+    fetchRoutines();
     fetchWorkouts();
   }, []);
+
+  const fetchRoutines = () => {
+    fetch('/api/routines')
+        .then((res) => res.json())
+        .then((data) => Array.isArray(data) && setRoutines(data));
+  };
 
   const fetchWorkouts = () => {
     fetch('/api/workouts')
@@ -99,7 +125,68 @@ export default function HevyCloneApp() {
     return `${mins}:${remSec < 10 ? '0' : ''}${remSec}`;
   };
 
-  // Calculate live volume and completed sets
+  // Add exercise to active workout AND fetch its previous history from Supabase
+  const handleSelectExerciseForWorkout = async (ex: DbExercise) => {
+    setShowExerciseModal(false);
+    setSearchQuery('');
+    try {
+      const res = await fetch(`/api/exercises/history?exerciseId=${ex.id}`);
+      const prevSets = res.ok ? await res.json() : [];
+      addExercise(ex, Array.isArray(prevSets) ? prevSets : []);
+    } catch {
+      addExercise(ex, []);
+    }
+  };
+
+  // Start routine and load "Previous" history for each exercise in the routine
+  const handleStartRoutine = async (routine: any) => {
+    startWorkoutFromRoutine(routine);
+    setTimeout(async () => {
+      const currentExercises = useWorkoutStore.getState().exercises;
+      for (const we of currentExercises) {
+        try {
+          const res = await fetch(`/api/exercises/history?exerciseId=${we.exerciseId}`);
+          if (res.ok) {
+            const prevSets = await res.json();
+            if (Array.isArray(prevSets) && prevSets.length > 0) {
+              setExercisePreviousSets(we.id, prevSets);
+            }
+          }
+        } catch {
+          // ignore offline error
+        }
+      }
+    }, 50);
+  };
+
+  // Save a new Routine Template
+  const handleSaveRoutine = async () => {
+    if (!draftRoutineName.trim() || draftRoutineExercises.length === 0) {
+      alert('Give your routine a name and add at least one exercise.');
+      return;
+    }
+    const res = await fetch('/api/routines', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: draftRoutineName,
+        exercises: draftRoutineExercises,
+      }),
+    });
+    if (res.ok) {
+      setDraftRoutineName('');
+      setDraftRoutineExercises([]);
+      setShowRoutineModal(false);
+      fetchRoutines();
+    }
+  };
+
+  const handleDeleteRoutine = async (id: string) => {
+    if (!confirm('Delete this routine template?')) return;
+    await fetch(`/api/routines?id=${id}`, { method: 'DELETE' });
+    fetchRoutines();
+  };
+
   const liveStats = exercises.reduce(
       (acc, ex) => {
         ex.sets.forEach((s) => {
@@ -174,6 +261,7 @@ export default function HevyCloneApp() {
           {!isActive ? (
               /* ================= HOME / DASHBOARD VIEW ================= */
               <div className="space-y-8">
+                {/* QUICK START */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
                   <h2 className="text-lg font-bold">Quick Start</h2>
                   <button
@@ -183,6 +271,59 @@ export default function HevyCloneApp() {
                     <Play className="w-4 h-4 fill-current" />
                     Start Empty Workout
                   </button>
+                </div>
+
+                {/* MY ROUTINES SECTION */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-bold flex items-center gap-2">
+                      <ClipboardList className="w-5 h-5 text-blue-400" />
+                      My Routines ({routines.length})
+                    </h2>
+                    <button
+                        onClick={() => setShowRoutineModal(true)}
+                        className="bg-slate-800 hover:bg-slate-700 text-blue-400 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition"
+                    >
+                      <FolderPlus className="w-4 h-4" />
+                      New Routine
+                    </button>
+                  </div>
+
+                  {routines.length === 0 ? (
+                      <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-6 text-center text-slate-400 text-sm">
+                        No routines yet. Create a routine template (like &ldquo;Push Day&rdquo; or &ldquo;Full Body&rdquo;) to start workouts with one tap!
+                      </div>
+                  ) : (
+                      <div className="grid gap-4">
+                        {routines.map((r) => (
+                            <div
+                                key={r.id}
+                                className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3"
+                            >
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <h3 className="font-bold text-base text-white">{r.name}</h3>
+                                  <p className="text-xs text-slate-400 mt-0.5">
+                                    {r.exercises?.map((re: any) => re.exercise?.name).join(' • ')}
+                                  </p>
+                                </div>
+                                <button
+                                    onClick={() => handleDeleteRoutine(r.id)}
+                                    className="text-slate-500 hover:text-red-400 p-1"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <button
+                                  onClick={() => handleStartRoutine(r)}
+                                  className="w-full bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-500/30 font-semibold py-2.5 rounded-xl text-sm transition"
+                              >
+                                Start Routine
+                              </button>
+                            </div>
+                        ))}
+                      </div>
+                  )}
                 </div>
 
                 {/* WORKOUT HISTORY FEED */}
@@ -300,27 +441,27 @@ export default function HevyCloneApp() {
                         </button>
                       </div>
 
-                      {/* SETS TABLE */}
+                      {/* SETS TABLE WITH "PREVIOUS" COLUMN */}
                       <div className="space-y-2">
-                        <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-slate-400 px-2">
+                        <div className="grid grid-cols-12 gap-1.5 text-[11px] font-semibold text-slate-400 px-1">
                           <div className="col-span-2">SET</div>
-                          <div className="col-span-4 text-center">KG</div>
-                          <div className="col-span-4 text-center">REPS</div>
+                          <div className="col-span-3 text-center">PREVIOUS</div>
+                          <div className="col-span-3 text-center">KG</div>
+                          <div className="col-span-2 text-center">REPS</div>
                           <div className="col-span-2 text-right">✓</div>
                         </div>
 
                         {ex.sets.map((s) => (
                             <div
                                 key={s.id}
-                                className={`grid grid-cols-12 gap-2 items-center p-1.5 rounded-xl transition ${
+                                className={`grid grid-cols-12 gap-1.5 items-center p-1.5 rounded-xl transition ${
                                     s.isCompleted ? 'bg-emerald-950/40 border border-emerald-800/40' : ''
                                 }`}
                             >
-                              {/* Set Number / Type Button (Tap to cycle N -> W -> D -> F) */}
-                              <div className="col-span-2 flex items-center gap-1">
+                              {/* Set Number / Type Badge */}
+                              <div className="col-span-2 flex items-center">
                                 <button
                                     onClick={() => cycleSetType(ex.id, s.id, s.setType)}
-                                    title="Click to cycle Set Type (Normal, Warmup, Dropset, Failure)"
                                     className={`w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center ${
                                         s.setType === 'WARMUP'
                                             ? 'bg-amber-500/20 text-amber-400'
@@ -335,8 +476,13 @@ export default function HevyCloneApp() {
                                 </button>
                               </div>
 
+                              {/* Previous Performance */}
+                              <div className="col-span-3 text-center text-xs text-slate-400 font-medium truncate">
+                                {s.previousText || '—'}
+                              </div>
+
                               {/* Weight Input */}
-                              <div className="col-span-4">
+                              <div className="col-span-3">
                                 <input
                                     type="number"
                                     inputMode="decimal"
@@ -348,7 +494,7 @@ export default function HevyCloneApp() {
                               </div>
 
                               {/* Reps Input */}
-                              <div className="col-span-4">
+                              <div className="col-span-2">
                                 <input
                                     type="number"
                                     inputMode="numeric"
@@ -374,7 +520,7 @@ export default function HevyCloneApp() {
                                 {ex.sets.length > 1 && (
                                     <button
                                         onClick={() => removeSet(ex.id, s.id)}
-                                        className="text-slate-600 hover:text-red-400 px-1"
+                                        className="text-slate-600 hover:text-red-400 px-0.5"
                                     >
                                       <X className="w-3.5 h-3.5" />
                                     </button>
@@ -396,7 +542,10 @@ export default function HevyCloneApp() {
                 {/* ADD EXERCISE & DISCARD BUTTONS */}
                 <div className="space-y-3 pt-2">
                   <button
-                      onClick={() => setShowExerciseModal(true)}
+                      onClick={() => {
+                        setRoutinePickerMode(false);
+                        setShowExerciseModal(true);
+                      }}
                       className="w-full bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-blue-400 font-semibold py-3 rounded-xl flex items-center justify-center gap-2 transition"
                   >
                     <Plus className="w-5 h-5" />
@@ -451,9 +600,130 @@ export default function HevyCloneApp() {
             </div>
         )}
 
+        {/* ROUTINE BUILDER MODAL */}
+        {showRoutineModal && (
+            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl p-5 space-y-4 max-h-[85vh] flex flex-col">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg">Create Routine Template</h3>
+                  <button
+                      onClick={() => setShowRoutineModal(false)}
+                      className="p-1 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <input
+                    type="text"
+                    placeholder="Routine Name (e.g., Push Day, Upper Body)..."
+                    value={draftRoutineName}
+                    onChange={(e) => setDraftRoutineName(e.target.value)}
+                    className="w-full bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+
+                <div className="overflow-y-auto space-y-3 flex-1 pr-1">
+                  {draftRoutineExercises.map((dex, exIdx) => (
+                      <div key={dex.id} className="bg-slate-800/60 rounded-xl p-3 space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold text-sm text-blue-400">{dex.name}</span>
+                          <button
+                              onClick={() =>
+                                  setDraftRoutineExercises((prev) => prev.filter((item) => item.id !== dex.id))
+                              }
+                              className="text-slate-400 hover:text-red-400"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        {dex.sets.map((st, sIdx) => (
+                            <div key={sIdx} className="grid grid-cols-7 gap-2 items-center text-xs">
+                              <span className="col-span-1 text-slate-400 font-bold">#{sIdx + 1}</span>
+                              <input
+                                  type="number"
+                                  placeholder="Target kg"
+                                  value={st.weight}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDraftRoutineExercises((prev) =>
+                                        prev.map((item, i) =>
+                                            i === exIdx
+                                                ? {
+                                                  ...item,
+                                                  sets: item.sets.map((s, si) =>
+                                                      si === sIdx ? { ...s, weight: val } : s
+                                                  ),
+                                                }
+                                                : item
+                                        )
+                                    );
+                                  }}
+                                  className="col-span-3 bg-slate-900 rounded-lg px-2 py-1.5 text-center"
+                              />
+                              <input
+                                  type="number"
+                                  placeholder="Target reps"
+                                  value={st.reps}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDraftRoutineExercises((prev) =>
+                                        prev.map((item, i) =>
+                                            i === exIdx
+                                                ? {
+                                                  ...item,
+                                                  sets: item.sets.map((s, si) =>
+                                                      si === sIdx ? { ...s, reps: val } : s
+                                                  ),
+                                                }
+                                                : item
+                                        )
+                                    );
+                                  }}
+                                  className="col-span-3 bg-slate-900 rounded-lg px-2 py-1.5 text-center"
+                              />
+                            </div>
+                        ))}
+                        <button
+                            onClick={() =>
+                                setDraftRoutineExercises((prev) =>
+                                    prev.map((item, i) =>
+                                        i === exIdx
+                                            ? { ...item, sets: [...item.sets, { weight: '', reps: '10' }] }
+                                            : item
+                                    )
+                                )
+                            }
+                            className="w-full bg-slate-800 hover:bg-slate-700 text-xs py-1.5 rounded-lg text-slate-300 font-semibold"
+                        >
+                          + Add Target Set
+                        </button>
+                      </div>
+                  ))}
+
+                  <button
+                      onClick={() => {
+                        setRoutinePickerMode(true);
+                        setShowExerciseModal(true);
+                      }}
+                      className="w-full border border-dashed border-slate-700 hover:border-blue-500 text-slate-300 py-2.5 rounded-xl text-sm font-semibold"
+                  >
+                    + Add Exercise to Routine
+                  </button>
+                </div>
+
+                <button
+                    onClick={handleSaveRoutine}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-sm"
+                >
+                  Save Routine
+                </button>
+              </div>
+            </div>
+        )}
+
         {/* EXERCISE PICKER MODAL */}
         {showExerciseModal && (
-            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40 flex items-end sm:items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
               <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl p-4 space-y-4 max-h-[80vh] flex flex-col">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-lg">Select Exercise</h3>
@@ -478,9 +748,25 @@ export default function HevyCloneApp() {
                       <button
                           key={ex.id}
                           onClick={() => {
-                            addExercise(ex);
-                            setShowExerciseModal(false);
-                            setSearchQuery('');
+                            if (routinePickerMode) {
+                              setDraftRoutineExercises((prev) => [
+                                ...prev,
+                                {
+                                  id: crypto.randomUUID(),
+                                  exerciseId: ex.id,
+                                  name: ex.name,
+                                  sets: [
+                                    { weight: '', reps: '10' },
+                                    { weight: '', reps: '10' },
+                                    { weight: '', reps: '10' },
+                                  ],
+                                },
+                              ]);
+                              setShowExerciseModal(false);
+                              setSearchQuery('');
+                            } else {
+                              handleSelectExerciseForWorkout(ex);
+                            }
                           }}
                           className="w-full text-left bg-slate-800/60 hover:bg-slate-800 p-3 rounded-xl flex items-center justify-between transition"
                       >
