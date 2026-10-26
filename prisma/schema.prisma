@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------
+enum UnitSystem {
+  METRIC   // kg, km
+  IMPERIAL // lbs, miles
+}
+
+enum MuscleGroup {
+  CHEST
+  BACK
+  SHOULDERS
+  BICEPS
+  TRICEPS
+  FOREARMS
+  QUADRICEPS
+  HAMSTRINGS
+  CALVES
+  GLUTES
+  ABS
+  CARDIO
+  FULL_BODY
+  OTHER
+}
+
+enum EquipmentType {
+  BARBELL
+  DUMBBELL
+  MACHINE
+  CABLE
+  BODYWEIGHT
+  KETTLEBELL
+  BAND
+  OTHER
+  NONE
+}
+
+enum ExerciseCategory {
+  WEIGHT_REPS          // e.g., Bench Press (kg + reps)
+  BODYWEIGHT_REPS      // e.g., Pull-ups (reps only)
+  WEIGHTED_BODYWEIGHT  // e.g., Weighted Dips (+kg + reps)
+  ASSISTED_BODYWEIGHT  // e.g., Assisted Chin-up (-kg + reps)
+  DURATION             // e.g., Plank (time)
+  DISTANCE_DURATION    // e.g., Running (km + time)
+}
+
+enum SetType {
+  WARMUP
+  NORMAL
+  DROPSET
+  FAILURE
+}
+
+// ------------------------------------------------------
+// 1. USER PROFILE
+// ------------------------------------------------------
+model User {
+  id             String          @id @default(uuid()) @db.Uuid
+  email          String          @unique
+  name           String?
+  unitPreference UnitSystem      @default(METRIC) @map("unit_preference")
+  defaultRestSec Int             @default(90) @map("default_rest_sec")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  exercises      Exercise[]
+  folders        RoutineFolder[]
+  routines       Routine[]
+  workouts       Workout[]
+
+  @@map("users")
+}
+
+// ------------------------------------------------------
+// 2. EXERCISE LIBRARY
+// ------------------------------------------------------
+model Exercise {
+  id               String           @id @default(uuid()) @db.Uuid
+  name             String
+  category         ExerciseCategory @default(WEIGHT_REPS)
+  equipment        EquipmentType    @default(BARBELL)
+  primaryMuscle    MuscleGroup      @map("primary_muscle")
+  secondaryMuscles MuscleGroup[]    @map("secondary_muscles")
+  instructions     String?
+  imageUrl         String?          @map("image_url")
+  
+  // Null userId means it's a global built-in exercise; set userId means custom user exercise
+  isCustom         Boolean          @default(false) @map("is_custom")
+  userId           String?          @map("user_id") @db.Uuid
+  user             User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  routineExercises RoutineExercise[]
+  workoutExercises WorkoutExercise[]
+
+  @@index([userId])
+  @@index([primaryMuscle])
+  @@map("exercises")
+}
+
+// ------------------------------------------------------
+// 3. ROUTINES (WORKOUT TEMPLATES)
+// ------------------------------------------------------
+model RoutineFolder {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  name       String
+  orderIndex Int       @default(0) @map("order_index")
+  
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  routines   Routine[]
+
+  @@map("routine_folders")
+}
+
+model Routine {
+  id          String            @id @default(uuid()) @db.Uuid
+  userId      String            @map("user_id") @db.Uuid
+  folderId    String?           @map("folder_id") @db.Uuid
+  name        String
+  notes       String?
+  orderIndex  Int               @default(0) @map("order_index")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder      RoutineFolder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  exercises   RoutineExercise[]
+  workouts    Workout[]
+
+  @@index([userId])
+  @@map("routines")
+}
+
+model RoutineExercise {
+  id               String       @id @default(uuid()) @db.Uuid
+  routineId        String       @map("routine_id") @db.Uuid
+  exerciseId       String       @map("exercise_id") @db.Uuid
+  orderIndex       Int          @map("order_index")
+  supersetGroupId  Int?         @map("superset_group_id") // Exercises sharing the same integer in a routine are grouped
+  restTimerSeconds Int?         @map("rest_timer_seconds")
+  notes            String?
+
+  routine          Routine      @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  exercise         Exercise     @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+  sets             RoutineSet[]
+
+  @@map("routine_exercises")
+}
+
+model RoutineSet {
+  id                String          @id @default(uuid()) @db.Uuid
+  routineExerciseId String          @map("routine_exercise_id") @db.Uuid
+  setNumber         Int             @map("set_number")
+  setType           SetType         @default(NORMAL) @map("set_type")
+  targetWeight      Float?          @map("target_weight") // Always stored in KG in DB
+  targetReps        Int?            @map("target_reps")
+  targetDurationSec Int?            @map("target_duration_sec")
+  targetDistanceKm  Float?          @map("target_distance_km")
+
+  routineExercise   RoutineExercise @relation(fields: [routineExerciseId], references: [id], onDelete: Cascade)
+
+  @@map("routine_sets")
+}
+
+// ------------------------------------------------------
+// 4. WORKOUT LOGS (HISTORICAL & ACTIVE SESSIONS)
+// ------------------------------------------------------
+model Workout {
+  id           String            @id @default(uuid()) @db.Uuid
+  userId       String            @map("user_id") @db.Uuid
+  routineId    String?           @map("routine_id") @db.Uuid
+  name         String
+  notes        String?
+  startTime    DateTime          @map("start_time")
+  endTime      DateTime?         @map("end_time") // Null while workout is in-progress
+  totalVolume  Float             @default(0) @map("total_volume") // Pre-calculated sum(weight * reps)
+  totalSets    Int               @default(0) @map("total_sets")
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  routine      Routine?          @relation(fields: [routineId], references: [id], onDelete: SetNull)
+  exercises    WorkoutExercise[]
+
+  @@index([userId, startTime(sort: Desc)])
+  @@map("workouts")
+}
+
+model WorkoutExercise {
+  id               String       @id @default(uuid()) @db.Uuid
+  workoutId        String       @map("workout_id") @db.Uuid
+  exerciseId       String       @map("exercise_id") @db.Uuid
+  orderIndex       Int          @map("order_index")
+  supersetGroupId  Int?         @map("superset_group_id")
+  restTimerSeconds Int?         @map("rest_timer_seconds")
+  notes            String?
+
+  workout          Workout      @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  exercise         Exercise     @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+  sets             WorkoutSet[]
+
+  @@index([exerciseId])
+  @@map("workout_exercises")
+}
+
+model WorkoutSet {
+  id                String          @id @default(uuid()) @db.Uuid
+  workoutExerciseId String          @map("workout_exercise_id") @db.Uuid
+  setNumber         Int             @map("set_number")
+  setType           SetType         @default(NORMAL) @map("set_type")
+  
+  weight            Float?          // Stored in KG
+  reps              Int?
+  rpe               Float?          // 1.0 - 10.0 (allows 8.5, 9.5)
+  durationSeconds   Int?            @map("duration_seconds")
+  distanceKm        Float?          @map("distance_km")
+  
+  isCompleted       Boolean         @default(false) @map("is_completed")
+  
+  // PR Flags calculated when workout finishes
+  isWeightPr        Boolean         @default(false) @map("is_weight_pr")
+  isVolumePr        Boolean         @default(false) @map("is_volume_pr")
+  is1RmPr           Boolean         @default(false) @map("is_1rm_pr")
+  estimated1Rm      Float?          @map("estimated_1rm")
+
+  workoutExercise   WorkoutExercise @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
+
+  @@map("workout_sets")
+}
