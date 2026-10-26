@@ -32,7 +32,7 @@ export async function GET() {
                     },
                 },
             },
-            take: 20,
+            take: 30,
         });
         return NextResponse.json(workouts);
     } catch (error) {
@@ -41,7 +41,7 @@ export async function GET() {
     }
 }
 
-// POST: Save a finished workout to Supabase
+// POST: Save a finished workout to Supabase & detect Personal Records (PRs)
 export async function POST(req: Request) {
     try {
         const body = await req.json();
@@ -51,42 +51,79 @@ export async function POST(req: Request) {
         let totalVolume = 0;
         let totalSets = 0;
 
-        const formattedExercises = exercises
-            .map((ex: any, index: number) => {
-                const completedSets = ex.sets.filter((s: any) => s.isCompleted);
+        const formattedExercises = [];
 
-                const setsData = completedSets.map((s: any, setIdx: number) => {
-                    const weight = parseFloat(s.weight) || 0;
-                    const reps = parseInt(s.reps, 10) || 0;
-                    const rpe = s.rpe ? parseFloat(s.rpe) : null;
+        for (let index = 0; index < exercises.length; index++) {
+            const ex = exercises[index];
+            const completedSets = ex.sets.filter((s: any) => s.isCompleted);
+            if (completedSets.length === 0) continue;
 
-                    totalVolume += weight * reps;
-                    totalSets += 1;
+            // Look up historical all-time bests for this exercise
+            const historicalSets = await prisma.workoutSet.findMany({
+                where: {
+                    isCompleted: true,
+                    workoutExercise: {
+                        exerciseId: ex.exerciseId,
+                        workout: { userId: user.id },
+                    },
+                },
+                select: { weight: true, estimated1Rm: true },
+            });
 
-                    // Epley 1RM Formula: Weight * (1 + Reps / 30)
-                    const estimated1Rm =
-                        weight > 0 && reps > 0 ? Number((weight * (1 + reps / 30)).toFixed(2)) : null;
+            let maxHistoricalWeight = historicalSets.reduce(
+                (max, s) => Math.max(max, s.weight || 0),
+                0
+            );
+            let maxHistorical1Rm = historicalSets.reduce(
+                (max, s) => Math.max(max, s.estimated1Rm || 0),
+                0
+            );
 
-                    return {
-                        setNumber: setIdx + 1,
-                        setType: s.setType,
-                        weight,
-                        reps,
-                        rpe,
-                        isCompleted: true,
-                        estimated1Rm,
-                    };
-                });
+            const setsData = completedSets.map((s: any, setIdx: number) => {
+                const weight = parseFloat(s.weight) || 0;
+                const reps = parseInt(s.reps, 10) || 0;
+                const rpe = s.rpe ? parseFloat(s.rpe) : null;
+
+                totalVolume += weight * reps;
+                totalSets += 1;
+
+                const estimated1Rm =
+                    weight > 0 && reps > 0 ? Number((weight * (1 + reps / 30)).toFixed(1)) : null;
+
+                // Check if this set beats the all-time Weight PR or 1RM PR
+                let isWeightPr = false;
+                let is1RmPr = false;
+
+                if (weight > 0 && weight > maxHistoricalWeight) {
+                    isWeightPr = true;
+                    maxHistoricalWeight = weight;
+                }
+                if (estimated1Rm && estimated1Rm > maxHistorical1Rm) {
+                    is1RmPr = true;
+                    maxHistorical1Rm = estimated1Rm;
+                }
 
                 return {
-                    exerciseId: ex.exerciseId,
-                    orderIndex: index,
-                    notes: ex.notes || null,
-                    restTimerSeconds: ex.restTimerSeconds || 90,
-                    sets: { create: setsData },
+                    setNumber: setIdx + 1,
+                    setType: s.setType,
+                    weight,
+                    reps,
+                    rpe,
+                    isCompleted: true,
+                    estimated1Rm,
+                    isWeightPr,
+                    is1RmPr,
                 };
-            })
-            .filter((ex: any) => ex.sets.create.length > 0);
+            });
+
+            formattedExercises.push({
+                exerciseId: ex.exerciseId,
+                orderIndex: index,
+                notes: ex.notes || null,
+                restTimerSeconds: ex.restTimerSeconds || 90,
+                sets: { create: setsData },
+            });
+        }
 
         if (formattedExercises.length === 0) {
             return NextResponse.json(
