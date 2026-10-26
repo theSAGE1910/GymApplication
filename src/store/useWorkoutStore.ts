@@ -7,14 +7,15 @@ export interface ActiveSet {
     id: string;
     setNumber: number;
     setType: SetType;
-    weight: string; // Stored as string during input so typing decimals like "22.5" is smooth
+    weight: string;
     reps: string;
     rpe: string;
+    previousText?: string; // e.g., "80kg × 10" from last session
     isCompleted: boolean;
 }
 
 export interface ActiveWorkoutExercise {
-    id: string; // Unique ID for this entry in the active workout
+    id: string;
     exerciseId: string;
     name: string;
     primaryMuscle: string;
@@ -26,19 +27,33 @@ export interface ActiveWorkoutExercise {
 
 interface WorkoutState {
     isActive: boolean;
+    routineId: string | null;
     workoutName: string;
-    startTime: number | null; // Unix timestamp (ms)
-    restEndTime: number | null; // Unix timestamp (ms) for accurate background countdown
+    startTime: number | null;
+    restEndTime: number | null;
     exercises: ActiveWorkoutExercise[];
 
     // Actions
     startEmptyWorkout: (name?: string) => void;
+    startWorkoutFromRoutine: (routine: any) => void;
     updateWorkoutName: (name: string) => void;
-    addExercise: (exercise: { id: string; name: string; primaryMuscle: string; equipment: string }) => void;
+    addExercise: (
+        exercise: { id: string; name: string; primaryMuscle: string; equipment: string },
+        previousSets?: { weight: number | null; reps: number | null }[]
+    ) => void;
+    setExercisePreviousSets: (
+        workoutExerciseId: string,
+        previousSets: { weight: number | null; reps: number | null }[]
+    ) => void;
     removeExercise: (workoutExerciseId: string) => void;
     addSet: (workoutExerciseId: string) => void;
     removeSet: (workoutExerciseId: string, setId: string) => void;
-    updateSet: (workoutExerciseId: string, setId: string, field: 'weight' | 'reps' | 'rpe' | 'setType', value: string) => void;
+    updateSet: (
+        workoutExerciseId: string,
+        setId: string,
+        field: 'weight' | 'reps' | 'rpe' | 'setType',
+        value: string
+    ) => void;
     toggleSetComplete: (workoutExerciseId: string, setId: string) => void;
     skipRestTimer: () => void;
     addRestTime: (seconds: number) => void;
@@ -49,7 +64,8 @@ export const useWorkoutStore = create<WorkoutState>()(
     persist(
         (set, get) => ({
             isActive: false,
-            workoutName: 'Evening Workout',
+            routineId: null,
+            workoutName: 'Workout Session',
             startTime: null,
             restEndTime: null,
             exercises: [],
@@ -57,27 +73,61 @@ export const useWorkoutStore = create<WorkoutState>()(
             startEmptyWorkout: (name = 'Workout Session') =>
                 set({
                     isActive: true,
+                    routineId: null,
                     workoutName: name,
                     startTime: Date.now(),
                     restEndTime: null,
                     exercises: [],
                 }),
 
+            startWorkoutFromRoutine: (routine) =>
+                set({
+                    isActive: true,
+                    routineId: routine.id,
+                    workoutName: routine.name,
+                    startTime: Date.now(),
+                    restEndTime: null,
+                    exercises: routine.exercises.map((re: any) => ({
+                        id: crypto.randomUUID(),
+                        exerciseId: re.exercise.id,
+                        name: re.exercise.name,
+                        primaryMuscle: re.exercise.primaryMuscle,
+                        equipment: re.exercise.equipment,
+                        notes: re.notes || '',
+                        restTimerSeconds: re.restTimerSeconds || 90,
+                        sets: re.sets.map((s: any, idx: number) => ({
+                            id: crypto.randomUUID(),
+                            setNumber: idx + 1,
+                            setType: s.setType || 'NORMAL',
+                            weight: s.targetWeight != null ? String(s.targetWeight) : '',
+                            reps: s.targetReps != null ? String(s.targetReps) : '',
+                            rpe: '',
+                            previousText: undefined,
+                            isCompleted: false,
+                        })),
+                    })),
+                }),
+
             updateWorkoutName: (name) => set({ workoutName: name }),
 
-            addExercise: (exercise) =>
-                set((state) => ({
-                    exercises: [
-                        ...state.exercises,
-                        {
-                            id: crypto.randomUUID(),
-                            exerciseId: exercise.id,
-                            name: exercise.name,
-                            primaryMuscle: exercise.primaryMuscle,
-                            equipment: exercise.equipment,
-                            notes: '',
-                            restTimerSeconds: 90,
-                            sets: [
+            addExercise: (exercise, previousSets = []) =>
+                set((state) => {
+                    const initialSets: ActiveSet[] =
+                        previousSets.length > 0
+                            ? previousSets.map((prev, idx) => ({
+                                id: crypto.randomUUID(),
+                                setNumber: idx + 1,
+                                setType: 'NORMAL',
+                                weight: prev.weight != null ? String(prev.weight) : '',
+                                reps: prev.reps != null ? String(prev.reps) : '',
+                                rpe: '',
+                                previousText:
+                                    prev.weight != null && prev.reps != null
+                                        ? `${prev.weight}kg × ${prev.reps}`
+                                        : '—',
+                                isCompleted: false,
+                            }))
+                            : [
                                 {
                                     id: crypto.randomUUID(),
                                     setNumber: 1,
@@ -85,11 +135,48 @@ export const useWorkoutStore = create<WorkoutState>()(
                                     weight: '',
                                     reps: '',
                                     rpe: '',
+                                    previousText: '—',
                                     isCompleted: false,
                                 },
-                            ],
-                        },
-                    ],
+                            ];
+
+                    return {
+                        exercises: [
+                            ...state.exercises,
+                            {
+                                id: crypto.randomUUID(),
+                                exerciseId: exercise.id,
+                                name: exercise.name,
+                                primaryMuscle: exercise.primaryMuscle,
+                                equipment: exercise.equipment,
+                                notes: '',
+                                restTimerSeconds: 90,
+                                sets: initialSets,
+                            },
+                        ],
+                    };
+                }),
+
+            setExercisePreviousSets: (workoutExerciseId, previousSets) =>
+                set((state) => ({
+                    exercises: state.exercises.map((ex) => {
+                        if (ex.id !== workoutExerciseId) return ex;
+                        return {
+                            ...ex,
+                            sets: ex.sets.map((s, idx) => {
+                                const prev = previousSets[idx];
+                                return {
+                                    ...s,
+                                    previousText:
+                                        prev && prev.weight != null && prev.reps != null
+                                            ? `${prev.weight}kg × ${prev.reps}`
+                                            : '—',
+                                    weight: s.weight === '' && prev?.weight != null ? String(prev.weight) : s.weight,
+                                    reps: s.reps === '' && prev?.reps != null ? String(prev.reps) : s.reps,
+                                };
+                            }),
+                        };
+                    }),
                 })),
 
             removeExercise: (workoutExerciseId) =>
@@ -110,10 +197,11 @@ export const useWorkoutStore = create<WorkoutState>()(
                                     id: crypto.randomUUID(),
                                     setNumber: ex.sets.length + 1,
                                     setType: 'NORMAL',
-                                    // Auto-fill weight & reps from the previous set just like Hevy!
+                                    // Autofill weight & reps from the previous set just like Hevy!
                                     weight: prevSet ? prevSet.weight : '',
                                     reps: prevSet ? prevSet.reps : '',
                                     rpe: '',
+                                    previousText: '—',
                                     isCompleted: false,
                                 },
                             ],
@@ -173,12 +261,15 @@ export const useWorkoutStore = create<WorkoutState>()(
 
             addRestTime: (seconds) =>
                 set((state) => ({
-                    restEndTime: state.restEndTime ? state.restEndTime + seconds * 1000 : Date.now() + seconds * 1000,
+                    restEndTime: state.restEndTime
+                        ? state.restEndTime + seconds * 1000
+                        : Date.now() + seconds * 1000,
                 })),
 
             discardWorkout: () =>
                 set({
                     isActive: false,
+                    routineId: null,
                     startTime: null,
                     restEndTime: null,
                     exercises: [],

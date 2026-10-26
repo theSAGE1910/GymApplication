@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import React, { useEffect, useState } from 'react';
 import { useWorkoutStore, SetType } from '@/store/useWorkoutStore';
