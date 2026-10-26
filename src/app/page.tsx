@@ -8,12 +8,15 @@ import {
   Check,
   Trash2,
   Clock,
+  Trophy,
   X,
   Play,
   SkipForward,
   Calendar,
   FolderPlus,
   ClipboardList,
+  BarChart3,
+  TrendingUp,
 } from 'lucide-react';
 
 interface DbExercise {
@@ -21,9 +24,36 @@ interface DbExercise {
   name: string;
   primaryMuscle: string;
   equipment: string;
+  isCustom?: boolean;
 }
 
 const SET_TYPE_Order: SetType[] = ['NORMAL', 'WARMUP', 'DROPSET', 'FAILURE'];
+
+const MUSCLE_GROUPS = [
+  'CHEST',
+  'BACK',
+  'SHOULDERS',
+  'BICEPS',
+  'TRICEPS',
+  'QUADRICEPS',
+  'HAMSTRINGS',
+  'GLUTES',
+  'CALVES',
+  'ABS',
+  'FOREARMS',
+  'FULL_BODY',
+];
+
+const EQUIPMENT_TYPES = [
+  'BARBELL',
+  'DUMBBELL',
+  'MACHINE',
+  'CABLE',
+  'BODYWEIGHT',
+  'KETTLEBELL',
+  'BAND',
+  'OTHER',
+];
 
 export default function HevyCloneApp() {
   const {
@@ -48,14 +78,22 @@ export default function HevyCloneApp() {
   } = useWorkoutStore();
 
   const [mounted, setMounted] = useState(false);
+  const [activeTab, setActiveTab] = useState<'workout' | 'analytics'>('workout');
   const [dbExercises, setDbExercises] = useState<DbExercise[]>([]);
   const [routines, setRoutines] = useState<any[]>([]);
   const [pastWorkouts, setPastWorkouts] = useState<any[]>([]);
+  const [selectedAnalyticsExId, setSelectedAnalyticsExId] = useState<string>('');
 
   // Modals
   const [showExerciseModal, setShowExerciseModal] = useState(false);
+  const [showCreateExerciseModal, setShowCreateExerciseModal] = useState(false);
   const [showRoutineModal, setShowRoutineModal] = useState(false);
   const [routinePickerMode, setRoutinePickerMode] = useState(false);
+
+  // Custom Exercise Form State
+  const [customExName, setCustomExName] = useState('');
+  const [customExMuscle, setCustomExMuscle] = useState('CHEST');
+  const [customExEquipment, setCustomExEquipment] = useState('BARBELL');
 
   // Routine Builder Draft State
   const [draftRoutineName, setDraftRoutineName] = useState('');
@@ -75,13 +113,23 @@ export default function HevyCloneApp() {
 
   useEffect(() => {
     setMounted(true);
-    fetch('/api/exercises')
-        .then((res) => res.json())
-        .then((data) => Array.isArray(data) && setDbExercises(data));
-
+    fetchExercises();
     fetchRoutines();
     fetchWorkouts();
   }, []);
+
+  const fetchExercises = () => {
+    fetch('/api/exercises')
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data)) {
+            setDbExercises(data);
+            if (data.length > 0 && !selectedAnalyticsExId) {
+              setSelectedAnalyticsExId(data[0].id);
+            }
+          }
+        });
+  };
 
   const fetchRoutines = () => {
     fetch('/api/routines')
@@ -125,7 +173,28 @@ export default function HevyCloneApp() {
     return `${mins}:${remSec < 10 ? '0' : ''}${remSec}`;
   };
 
-  // Add exercise to active workout AND fetch its previous history from Supabase
+  const handleCreateCustomExercise = async () => {
+    if (!customExName.trim()) return;
+    const res = await fetch('/api/exercises', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: customExName,
+        primaryMuscle: customExMuscle,
+        equipment: customExEquipment,
+      }),
+    });
+    if (res.ok) {
+      const created = await res.json();
+      setCustomExName('');
+      setShowCreateExerciseModal(false);
+      fetchExercises();
+      if (!routinePickerMode && isActive) {
+        handleSelectExerciseForWorkout(created);
+      }
+    }
+  };
+
   const handleSelectExerciseForWorkout = async (ex: DbExercise) => {
     setShowExerciseModal(false);
     setSearchQuery('');
@@ -138,9 +207,9 @@ export default function HevyCloneApp() {
     }
   };
 
-  // Start routine and load "Previous" history for each exercise in the routine
   const handleStartRoutine = async (routine: any) => {
     startWorkoutFromRoutine(routine);
+    setActiveTab('workout');
     setTimeout(async () => {
       const currentExercises = useWorkoutStore.getState().exercises;
       for (const we of currentExercises) {
@@ -159,7 +228,6 @@ export default function HevyCloneApp() {
     }, 50);
   };
 
-  // Save a new Routine Template
   const handleSaveRoutine = async () => {
     if (!draftRoutineName.trim() || draftRoutineExercises.length === 0) {
       alert('Give your routine a name and add at least one exercise.');
@@ -235,8 +303,63 @@ export default function HevyCloneApp() {
           ex.primaryMuscle.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // ================= ANALYTICS CALCULATIONS =================
+  const totalCompletedWorkouts = pastWorkouts.length;
+  const lifetimeVolume = pastWorkouts.reduce((sum, w) => sum + (w.totalVolume || 0), 0);
+
+  // Muscle Group Set Distribution
+  const muscleCounts: Record<string, number> = {};
+  let totalLoggedSets = 0;
+  pastWorkouts.forEach((w) => {
+    w.exercises?.forEach((we: any) => {
+      const m = we.exercise?.primaryMuscle || 'OTHER';
+      const setLen = we.sets?.length || 0;
+      muscleCounts[m] = (muscleCounts[m] || 0) + setLen;
+      totalLoggedSets += setLen;
+    });
+  });
+
+  // Selected Exercise Progression & PRs
+  const exerciseSessions: { date: string; bestWeight: number; best1Rm: number; bestVolume: number }[] = [];
+  let allTimeBestWeight = 0;
+  let allTimeBest1Rm = 0;
+  let allTimeBestVolume = 0;
+
+  [...pastWorkouts].reverse().forEach((w) => {
+    w.exercises?.forEach((we: any) => {
+      if (we.exerciseId === selectedAnalyticsExId && we.sets?.length > 0) {
+        let sessionMaxWeight = 0;
+        let sessionMax1Rm = 0;
+        let sessionMaxVol = 0;
+        we.sets.forEach((s: any) => {
+          const wt = s.weight || 0;
+          const rp = s.reps || 0;
+          const rm = s.estimated1Rm || (wt > 0 && rp > 0 ? Number((wt * (1 + rp / 30)).toFixed(1)) : 0);
+          const vol = wt * rp;
+          if (wt > sessionMaxWeight) sessionMaxWeight = wt;
+          if (rm > sessionMax1Rm) sessionMax1Rm = rm;
+          if (vol > sessionMaxVol) sessionMaxVol = vol;
+        });
+
+        if (sessionMaxWeight > allTimeBestWeight) allTimeBestWeight = sessionMaxWeight;
+        if (sessionMax1Rm > allTimeBest1Rm) allTimeBest1Rm = sessionMax1Rm;
+        if (sessionMaxVol > allTimeBestVolume) allTimeBestVolume = sessionMaxVol;
+
+        exerciseSessions.push({
+          date: new Date(w.startTime).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+          }),
+          bestWeight: sessionMaxWeight,
+          best1Rm: sessionMax1Rm,
+          bestVolume: sessionMaxVol,
+        });
+      }
+    });
+  });
+
   return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 pb-32">
+      <div className="min-h-screen bg-slate-950 text-slate-100 pb-36">
         {/* TOP BAR */}
         <header className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between max-w-2xl mx-auto">
           <div className="flex items-center gap-2">
@@ -258,10 +381,144 @@ export default function HevyCloneApp() {
         </header>
 
         <main className="max-w-2xl mx-auto p-4 space-y-6">
-          {!isActive ? (
+          {activeTab === 'analytics' && !isActive ? (
+              /* ================= ANALYTICS & PR DASHBOARD ================= */
+              <div className="space-y-6">
+                {/* SUMMARY CARDS */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <p className="text-xs text-slate-400">Workouts</p>
+                    <p className="text-2xl font-bold text-white mt-1">{totalCompletedWorkouts}</p>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <p className="text-xs text-slate-400">Total Volume</p>
+                    <p className="text-2xl font-bold text-blue-400 mt-1">
+                      {lifetimeVolume.toLocaleString()} <span className="text-xs">kg</span>
+                    </p>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <p className="text-xs text-slate-400">Total Sets</p>
+                    <p className="text-2xl font-bold text-emerald-400 mt-1">{totalLoggedSets}</p>
+                  </div>
+                </div>
+
+                {/* MUSCLE DISTRIBUTION */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                  <h2 className="font-bold text-base flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-blue-400" />
+                    Muscle Split (Sets Logged)
+                  </h2>
+                  {totalLoggedSets === 0 ? (
+                      <p className="text-sm text-slate-400">Log a workout to see your muscle distribution.</p>
+                  ) : (
+                      <div className="space-y-2.5">
+                        {Object.entries(muscleCounts)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([muscle, count]) => {
+                              const pct = Math.round((count / totalLoggedSets) * 100);
+                              return (
+                                  <div key={muscle} className="space-y-1">
+                                    <div className="flex justify-between text-xs">
+                                      <span className="font-semibold text-slate-200">{muscle}</span>
+                                      <span className="text-slate-400">
+                              {count} sets ({pct}%)
+                            </span>
+                                    </div>
+                                    <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                                      <div
+                                          className="bg-blue-500 h-full rounded-full"
+                                          style={{ width: `${pct}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                              );
+                            })}
+                      </div>
+                  )}
+                </div>
+
+                {/* EXERCISE PRs & 1RM PROGRESSION */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-5">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-bold text-base flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-emerald-400" />
+                      Exercise Progression & PRs
+                    </h2>
+                  </div>
+
+                  <select
+                      value={selectedAnalyticsExId}
+                      onChange={(e) => setSelectedAnalyticsExId(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {dbExercises.map((ex) => (
+                        <option key={ex.id} value={ex.id}>
+                          {ex.name} ({ex.primaryMuscle})
+                        </option>
+                    ))}
+                  </select>
+
+                  {/* ALL-TIME PR TROPHY CARDS */}
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-center">
+                      <Trophy className="w-4 h-4 text-amber-400 mx-auto mb-1" />
+                      <p className="text-[11px] text-slate-400">Heaviest Weight</p>
+                      <p className="font-bold text-sm text-white mt-0.5">{allTimeBestWeight} kg</p>
+                    </div>
+                    <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-center">
+                      <Trophy className="w-4 h-4 text-amber-400 mx-auto mb-1" />
+                      <p className="text-[11px] text-slate-400">Best Est. 1RM</p>
+                      <p className="font-bold text-sm text-amber-400 mt-0.5">{allTimeBest1Rm} kg</p>
+                    </div>
+                    <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-center">
+                      <Trophy className="w-4 h-4 text-amber-400 mx-auto mb-1" />
+                      <p className="text-[11px] text-slate-400">Best Set Volume</p>
+                      <p className="font-bold text-sm text-emerald-400 mt-0.5">{allTimeBestVolume} kg</p>
+                    </div>
+                  </div>
+
+                  {/* BAR CHART OF ESTIMATED 1RM OVER TIME */}
+                  {exerciseSessions.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-6">
+                        No completed sessions for this exercise yet.
+                      </p>
+                  ) : (
+                      <div className="space-y-2 pt-2">
+                        <p className="text-xs text-slate-400 font-semibold">
+                          Estimated 1RM Progression (kg)
+                        </p>
+                        <div className="flex items-end gap-3 h-36 pt-6 px-2 bg-slate-950/50 rounded-xl border border-slate-800/80 overflow-x-auto">
+                          {exerciseSessions.map((sess, i) => {
+                            const heightPct =
+                                allTimeBest1Rm > 0
+                                    ? Math.max(15, Math.round((sess.best1Rm / allTimeBest1Rm) * 100))
+                                    : 20;
+                            return (
+                                <div
+                                    key={i}
+                                    className="flex flex-col items-center justify-end h-full flex-1 min-w-[44px]"
+                                >
+                          <span className="text-[10px] font-bold text-blue-400 mb-1">
+                            {sess.best1Rm}
+                          </span>
+                                  <div
+                                      className="w-full max-w-[32px] bg-gradient-to-t from-blue-600 to-blue-400 rounded-t-lg transition-all"
+                                      style={{ height: `${heightPct}%` }}
+                                  />
+                                  <span className="text-[10px] text-slate-400 mt-1.5 truncate">
+                            {sess.date}
+                          </span>
+                                </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                  )}
+                </div>
+              </div>
+          ) : !isActive ? (
               /* ================= HOME / DASHBOARD VIEW ================= */
               <div className="space-y-8">
-                {/* QUICK START */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
                   <h2 className="text-lg font-bold">Quick Start</h2>
                   <button
@@ -326,7 +583,7 @@ export default function HevyCloneApp() {
                   )}
                 </div>
 
-                {/* WORKOUT HISTORY FEED */}
+                {/* WORKOUT HISTORY FEED WITH PR BADGES */}
                 <div className="space-y-4">
                   <h2 className="text-lg font-bold flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-blue-400" />
@@ -338,62 +595,91 @@ export default function HevyCloneApp() {
                         No workouts logged yet. Start your first session above!
                       </div>
                   ) : (
-                      pastWorkouts.map((w) => (
-                          <div
-                              key={w.id}
-                              className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4"
-                          >
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <h3 className="font-bold text-base text-white">{w.name}</h3>
-                                <p className="text-xs text-slate-400">
-                                  {new Date(w.startTime).toLocaleDateString(undefined, {
-                                    weekday: 'short',
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </p>
-                              </div>
-                              <div className="flex gap-4 text-right">
-                                <div>
-                                  <p className="text-xs text-slate-400">Volume</p>
-                                  <p className="font-semibold text-sm">{w.totalVolume} kg</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs text-slate-400">Sets</p>
-                                  <p className="font-semibold text-sm">{w.totalSets}</p>
-                                </div>
-                              </div>
-                            </div>
+                      pastWorkouts.map((w) => {
+                        const prCount =
+                            w.exercises?.reduce(
+                                (cnt: number, we: any) =>
+                                    cnt +
+                                    (we.sets?.filter((s: any) => s.isWeightPr || s.is1RmPr).length || 0),
+                                0
+                            ) || 0;
 
-                            <div className="border-t border-slate-800 pt-3 space-y-1.5">
-                              {w.exercises?.map((we: any) => (
-                                  <div key={we.id} className="text-sm text-slate-300 flex justify-between">
-                          <span>
-                            <span className="font-semibold text-blue-400">
-                              {we.sets?.length} sets
-                            </span>{' '}
-                            × {we.exercise?.name}
-                          </span>
-                                    {we.sets?.[0] && (
-                                        <span className="text-slate-400 text-xs">
-                              Best: {we.sets[0].weight}kg × {we.sets[0].reps}
-                            </span>
+                        return (
+                            <div
+                                key={w.id}
+                                className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4"
+                            >
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="font-bold text-base text-white">{w.name}</h3>
+                                    {prCount > 0 && (
+                                        <span className="bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <Trophy className="w-3 h-3" /> {prCount} PR{prCount > 1 ? 's' : ''}
+                              </span>
                                     )}
                                   </div>
-                              ))}
+                                  <p className="text-xs text-slate-400 mt-0.5">
+                                    {new Date(w.startTime).toLocaleDateString(undefined, {
+                                      weekday: 'short',
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </p>
+                                </div>
+                                <div className="flex gap-4 text-right">
+                                  <div>
+                                    <p className="text-xs text-slate-400">Volume</p>
+                                    <p className="font-semibold text-sm">{w.totalVolume} kg</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-slate-400">Sets</p>
+                                    <p className="font-semibold text-sm">{w.totalSets}</p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="border-t border-slate-800 pt-3 space-y-1.5">
+                                {w.exercises?.map((we: any) => {
+                                  const hasPr = we.sets?.some((s: any) => s.isWeightPr || s.is1RmPr);
+                                  return (
+                                      <div
+                                          key={we.id}
+                                          className="text-sm text-slate-300 flex justify-between items-center"
+                                      >
+                              <span>
+                                <span className="font-semibold text-blue-400">
+                                  {we.sets?.length} sets
+                                </span>{' '}
+                                × {we.exercise?.name}
+                              </span>
+                                        <div className="flex items-center gap-2">
+                                          {hasPr && (
+                                              <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-bold">
+                                    🏆 PR
+                                  </span>
+                                          )}
+                                          {we.sets?.[0] && (
+                                              <span className="text-slate-400 text-xs">
+                                    Best: {we.sets[0].weight}kg × {we.sets[0].reps}
+                                  </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
-                      ))
+                        );
+                      })
                   )}
                 </div>
               </div>
           ) : (
               /* ================= ACTIVE WORKOUT LOGGER VIEW ================= */
               <div className="space-y-6">
-                {/* LIVE STATS BAR */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
                   <input
                       type="text"
@@ -420,7 +706,6 @@ export default function HevyCloneApp() {
                   </div>
                 </div>
 
-                {/* EXERCISE CARDS */}
                 {exercises.map((ex) => (
                     <div
                         key={ex.id}
@@ -441,7 +726,6 @@ export default function HevyCloneApp() {
                         </button>
                       </div>
 
-                      {/* SETS TABLE WITH "PREVIOUS" COLUMN */}
                       <div className="space-y-2">
                         <div className="grid grid-cols-12 gap-1.5 text-[11px] font-semibold text-slate-400 px-1">
                           <div className="col-span-2">SET</div>
@@ -458,7 +742,6 @@ export default function HevyCloneApp() {
                                     s.isCompleted ? 'bg-emerald-950/40 border border-emerald-800/40' : ''
                                 }`}
                             >
-                              {/* Set Number / Type Badge */}
                               <div className="col-span-2 flex items-center">
                                 <button
                                     onClick={() => cycleSetType(ex.id, s.id, s.setType)}
@@ -476,12 +759,10 @@ export default function HevyCloneApp() {
                                 </button>
                               </div>
 
-                              {/* Previous Performance */}
                               <div className="col-span-3 text-center text-xs text-slate-400 font-medium truncate">
                                 {s.previousText || '—'}
                               </div>
 
-                              {/* Weight Input */}
                               <div className="col-span-3">
                                 <input
                                     type="number"
@@ -493,7 +774,6 @@ export default function HevyCloneApp() {
                                 />
                               </div>
 
-                              {/* Reps Input */}
                               <div className="col-span-2">
                                 <input
                                     type="number"
@@ -505,7 +785,6 @@ export default function HevyCloneApp() {
                                 />
                               </div>
 
-                              {/* Complete Checkmark & Delete */}
                               <div className="col-span-2 flex justify-end gap-1">
                                 <button
                                     onClick={() => toggleSetComplete(ex.id, s.id)}
@@ -539,7 +818,6 @@ export default function HevyCloneApp() {
                     </div>
                 ))}
 
-                {/* ADD EXERCISE & DISCARD BUTTONS */}
                 <div className="space-y-3 pt-2">
                   <button
                       onClick={() => {
@@ -567,7 +845,7 @@ export default function HevyCloneApp() {
 
         {/* FLOATING REST TIMER BAR */}
         {isActive && restRemainingSec > 0 && (
-            <div className="fixed bottom-4 inset-x-4 max-w-2xl mx-auto bg-slate-900 border border-blue-500/50 shadow-2xl rounded-2xl p-3.5 flex items-center justify-between z-30">
+            <div className="fixed bottom-16 inset-x-4 max-w-2xl mx-auto bg-slate-900 border border-blue-500/50 shadow-2xl rounded-2xl p-3.5 flex items-center justify-between z-30">
               <div className="flex items-center gap-3">
                 <Clock className="w-5 h-5 text-blue-400 animate-pulse" />
                 <div>
@@ -598,6 +876,32 @@ export default function HevyCloneApp() {
                 </button>
               </div>
             </div>
+        )}
+
+        {/* BOTTOM NAVIGATION BAR */}
+        {!isActive && (
+            <nav className="fixed bottom-0 inset-x-0 bg-slate-900/95 backdrop-blur border-t border-slate-800 z-20">
+              <div className="max-w-2xl mx-auto grid grid-cols-2 py-2">
+                <button
+                    onClick={() => setActiveTab('workout')}
+                    className={`flex flex-col items-center gap-1 py-1 text-xs font-semibold transition ${
+                        activeTab === 'workout' ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                >
+                  <Dumbbell className="w-5 h-5" />
+                  Workout
+                </button>
+                <button
+                    onClick={() => setActiveTab('analytics')}
+                    className={`flex flex-col items-center gap-1 py-1 text-xs font-semibold transition ${
+                        activeTab === 'analytics' ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                >
+                  <BarChart3 className="w-5 h-5" />
+                  Analytics & PRs
+                </button>
+              </div>
+            </nav>
         )}
 
         {/* ROUTINE BUILDER MODAL */}
@@ -727,12 +1031,20 @@ export default function HevyCloneApp() {
               <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl p-4 space-y-4 max-h-[80vh] flex flex-col">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-lg">Select Exercise</h3>
-                  <button
-                      onClick={() => setShowExerciseModal(false)}
-                      className="p-1 text-slate-400 hover:text-white"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setShowCreateExerciseModal(true)}
+                        className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-xs font-semibold px-3 py-1.5 rounded-lg"
+                    >
+                      + Create Custom
+                    </button>
+                    <button
+                        onClick={() => setShowExerciseModal(false)}
+                        className="p-1 text-slate-400 hover:text-white"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
 
                 <input
@@ -771,7 +1083,14 @@ export default function HevyCloneApp() {
                           className="w-full text-left bg-slate-800/60 hover:bg-slate-800 p-3 rounded-xl flex items-center justify-between transition"
                       >
                         <div>
-                          <p className="font-semibold text-sm text-white">{ex.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold text-sm text-white">{ex.name}</p>
+                            {ex.isCustom && (
+                                <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
+                          Custom
+                        </span>
+                            )}
+                          </div>
                           <p className="text-xs text-slate-400">
                             {ex.primaryMuscle} • {ex.equipment}
                           </p>
@@ -780,6 +1099,73 @@ export default function HevyCloneApp() {
                       </button>
                   ))}
                 </div>
+              </div>
+            </div>
+        )}
+
+        {/* CREATE CUSTOM EXERCISE MODAL */}
+        {showCreateExerciseModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg">Create Custom Exercise</h3>
+                  <button
+                      onClick={() => setShowCreateExerciseModal(false)}
+                      className="p-1 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-slate-400 font-semibold">Exercise Name</label>
+                    <input
+                        type="text"
+                        placeholder="e.g., Bayesian Cable Curl"
+                        value={customExName}
+                        onChange={(e) => setCustomExName(e.target.value)}
+                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-400 font-semibold">Primary Muscle Group</label>
+                    <select
+                        value={customExMuscle}
+                        onChange={(e) => setCustomExMuscle(e.target.value)}
+                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {MUSCLE_GROUPS.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-400 font-semibold">Equipment</label>
+                    <select
+                        value={customExEquipment}
+                        onChange={(e) => setCustomExEquipment(e.target.value)}
+                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {EQUIPMENT_TYPES.map((eq) => (
+                          <option key={eq} value={eq}>
+                            {eq}
+                          </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                    onClick={handleCreateCustomExercise}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-sm"
+                >
+                  Save Exercise
+                </button>
               </div>
             </div>
         )}
