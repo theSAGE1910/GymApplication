@@ -23,6 +23,7 @@ import {
   User as UserIcon,
   LogOut,
   Flame,
+  Zap,
 } from 'lucide-react';
 
 interface DbExercise {
@@ -71,6 +72,17 @@ const STANDARD_PLATES = [
   { weight: 1.25, color: 'bg-slate-500 text-white h-10' },
 ];
 
+const REP_MAX_PERCENTAGES = [
+  { pct: 100, estReps: '1 RM' },
+  { pct: 95, estReps: '2 RM' },
+  { pct: 90, estReps: '4 RM' },
+  { pct: 85, estReps: '6 RM' },
+  { pct: 80, estReps: '8 RM' },
+  { pct: 75, estReps: '10 RM' },
+  { pct: 70, estReps: '12 RM' },
+  { pct: 65, estReps: '15 RM' },
+];
+
 export default function HevyCloneApp() {
   const {
     isActive,
@@ -85,6 +97,7 @@ export default function HevyCloneApp() {
     setExercisePreviousSets,
     updateExerciseNotes,
     toggleSuperset,
+    generateWarmupSets,
     removeExercise,
     addSet,
     removeSet,
@@ -118,6 +131,14 @@ export default function HevyCloneApp() {
   const [showPlateCalc, setShowPlateCalc] = useState(false);
   const [plateCalcWeight, setPlateCalcWeight] = useState('100');
   const [barWeight, setBarWeight] = useState(20);
+
+  // 1RM Calculator & Warm-up Generator State
+  const [show1RmModal, setShow1RmModal] = useState(false);
+  const [calcWeight, setCalcWeight] = useState('80');
+  const [calcReps, setCalcReps] = useState('5');
+  const [warmupTargetExId, setWarmupTargetExId] = useState<string | null>(null);
+  const [warmupTargetWeight, setWarmupTargetWeight] = useState('80');
+
   const [routinePickerMode, setRoutinePickerMode] = useState(false);
 
   // Custom Exercise Form State
@@ -225,6 +246,30 @@ export default function HevyCloneApp() {
     const mins = Math.floor(sec / 60);
     const remSec = sec % 60;
     return `${mins}:${remSec < 10 ? '0' : ''}${remSec}`;
+  };
+
+  // Epley 1RM Calculation for the 1RM Calculator Modal
+  const parsedCalcWeight = parseFloat(calcWeight) || 0;
+  const parsedCalcReps = parseInt(calcReps, 10) || 0;
+  const calculated1Rm =
+      parsedCalcWeight > 0 && parsedCalcReps > 0
+          ? parsedCalcReps === 1
+              ? parsedCalcWeight
+              : Number((parsedCalcWeight * (1 + parsedCalcReps / 30)).toFixed(1))
+          : 0;
+
+  const handleOpenWarmupGenerator = (ex: any) => {
+    // Default to the first normal set's weight if already entered, otherwise 80kg
+    const firstWorkingSet = ex.sets.find((s: any) => s.setType === 'NORMAL' && parseFloat(s.weight) > 0);
+    setWarmupTargetWeight(firstWorkingSet ? firstWorkingSet.weight : '80');
+    setWarmupTargetExId(ex.id);
+  };
+
+  const handleConfirmGenerateWarmups = () => {
+    const wt = parseFloat(warmupTargetWeight) || 0;
+    if (!warmupTargetExId || wt <= 0) return;
+    generateWarmupSets(warmupTargetExId, wt);
+    setWarmupTargetExId(null);
   };
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -523,11 +568,20 @@ export default function HevyCloneApp() {
             <span className="font-bold text-lg tracking-tight">HEVY CLONE</span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <button
+                onClick={() => setShow1RmModal(true)}
+                title="1RM & Percentage Calculator"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-2 rounded-lg transition flex items-center gap-1 text-xs font-semibold"
+            >
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span>1RM</span>
+            </button>
+
             <button
                 onClick={() => setShowPlateCalc(true)}
                 title="Barbell Plate Calculator"
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 p-2 rounded-lg transition flex items-center gap-1.5 text-xs font-semibold"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 p-2 rounded-lg transition flex items-center gap-1 text-xs font-semibold"
             >
               <Calculator className="w-4 h-4 text-blue-400" />
               <span className="hidden sm:inline">Plates</span>
@@ -540,7 +594,7 @@ export default function HevyCloneApp() {
                     title="Account & Login"
                 >
                   <UserIcon className="w-4 h-4 text-emerald-400" />
-                  <span className="max-w-[90px] truncate hidden sm:inline">
+                  <span className="max-w-[85px] truncate hidden sm:inline">
                 {userEmail === 'athlete@hevy-clone.local' ? 'Sign In' : userEmail.split('@')[0]}
               </span>
                 </button>
@@ -748,7 +802,7 @@ export default function HevyCloneApp() {
                   <div className="flex items-center justify-between">
                     <h2 className="text-lg font-bold">Quick Start</h2>
                     <span className="text-xs text-slate-400">
-                   Athlete: <strong className="text-slate-200">{userEmail.split('@')[0]}</strong>
+                  Athlete: <strong className="text-slate-200">{userEmail.split('@')[0]}</strong>
                 </span>
                   </div>
                   <button
@@ -976,6 +1030,14 @@ export default function HevyCloneApp() {
                         </div>
                         <div className="flex items-center gap-1">
                           <button
+                              onClick={() => handleOpenWarmupGenerator(ex)}
+                              title="Generate Progressive Warm-up Sets"
+                              className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition"
+                          >
+                            <Flame className="w-3.5 h-3.5" />
+                            Warm-up
+                          </button>
+                          <button
                               onClick={() => toggleSuperset(ex.id)}
                               title="Toggle Superset Group (None -> A -> B)"
                               className={`p-1.5 rounded-lg transition ${
@@ -1193,6 +1255,143 @@ export default function HevyCloneApp() {
                 </button>
               </div>
             </nav>
+        )}
+
+        {/* 1RM & PERCENTAGE TABLE CALCULATOR MODAL */}
+        {show1RmModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg flex items-center gap-2">
+                    <Zap className="w-5 h-5 text-amber-400" />
+                    1RM & Rep-Max Calculator
+                  </h3>
+                  <button
+                      onClick={() => setShow1RmModal(false)}
+                      className="p-1 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 font-semibold">Weight Lifted (kg)</label>
+                    <input
+                        type="number"
+                        value={calcWeight}
+                        onChange={(e) => setCalcWeight(e.target.value)}
+                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 font-semibold">Reps Performed</label>
+                    <input
+                        type="number"
+                        value={calcReps}
+                        onChange={(e) => setCalcReps(e.target.value)}
+                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-r from-blue-600/20 to-amber-500/20 border border-amber-500/40 rounded-xl p-4 text-center">
+                  <p className="text-xs text-slate-300 uppercase tracking-wider font-semibold">
+                    Estimated One-Rep Max (1RM)
+                  </p>
+                  <p className="text-3xl font-extrabold text-amber-400 mt-1">{calculated1Rm} kg</p>
+                </div>
+
+                <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-3 text-[11px] font-bold text-slate-400 px-3 pb-1 border-b border-slate-800">
+                    <span>% OF 1RM</span>
+                    <span className="text-center">EST. REPS</span>
+                    <span className="text-right">TARGET WEIGHT</span>
+                  </div>
+                  {REP_MAX_PERCENTAGES.map((row) => {
+                    const targetWt =
+                        calculated1Rm > 0 ? Number(((calculated1Rm * row.pct) / 100).toFixed(1)) : 0;
+                    return (
+                        <div
+                            key={row.pct}
+                            className="grid grid-cols-3 items-center text-xs bg-slate-950/60 px-3 py-2 rounded-lg"
+                        >
+                          <span className="font-bold text-blue-400">{row.pct}%</span>
+                          <span className="text-center text-slate-300">{row.estReps}</span>
+                          <span className="text-right font-bold text-white">{targetWt} kg</span>
+                        </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+        )}
+
+        {/* WARM-UP SET GENERATOR MODAL */}
+        {warmupTargetExId && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg flex items-center gap-2">
+                    <Flame className="w-5 h-5 text-amber-400" />
+                    Warm-up Set Generator
+                  </h3>
+                  <button
+                      onClick={() => setWarmupTargetExId(null)}
+                      className="p-1 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <p className="text-xs text-slate-400">
+                  Enter your first working set weight. We&apos;ll automatically insert progressive warm-up sets (Empty Bar, 50%, 70%, 85%) rounded to the nearest 2.5 kg.
+                </p>
+
+                <div>
+                  <label className="text-xs text-slate-400 font-semibold">Working Weight (kg)</label>
+                  <input
+                      type="number"
+                      value={warmupTargetWeight}
+                      onChange={(e) => setWarmupTargetWeight(e.target.value)}
+                      className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
+
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5 text-xs">
+                  <p className="font-semibold text-amber-400 mb-1">Preview Warm-up Pyramid:</p>
+                  <div className="flex justify-between text-slate-300">
+                    <span>Warm-up 1 (Bar)</span>
+                    <span className="font-bold">20 kg × 10</span>
+                  </div>
+                  <div className="flex justify-between text-slate-300">
+                    <span>Warm-up 2 (50%)</span>
+                    <span className="font-bold">
+                  {Math.max(20, Math.round(((parseFloat(warmupTargetWeight) || 0) * 0.5) / 2.5) * 2.5)} kg × 8
+                </span>
+                  </div>
+                  <div className="flex justify-between text-slate-300">
+                    <span>Warm-up 3 (70%)</span>
+                    <span className="font-bold">
+                  {Math.max(20, Math.round(((parseFloat(warmupTargetWeight) || 0) * 0.7) / 2.5) * 2.5)} kg × 5
+                </span>
+                  </div>
+                  <div className="flex justify-between text-slate-300">
+                    <span>Warm-up 4 (85%)</span>
+                    <span className="font-bold">
+                  {Math.max(20, Math.round(((parseFloat(warmupTargetWeight) || 0) * 0.85) / 2.5) * 2.5)} kg × 2
+                </span>
+                  </div>
+                </div>
+
+                <button
+                    onClick={handleConfirmGenerateWarmups}
+                    className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition"
+                >
+                  Insert Warm-up Sets
+                </button>
+              </div>
+            </div>
         )}
 
         {/* SUPABASE AUTH / USER ACCOUNT MODAL */}

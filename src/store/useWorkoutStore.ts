@@ -10,7 +10,7 @@ export interface ActiveSet {
     weight: string;
     reps: string;
     rpe: string;
-    previousText?: string; // e.g., "80kg × 10" from last session
+    previousText?: string;
     isCompleted: boolean;
 }
 
@@ -21,10 +21,13 @@ export interface ActiveWorkoutExercise {
     primaryMuscle: string;
     equipment: string;
     notes: string;
-    supersetGroupId: number | null; // 1 = Superset A, 2 = Superset B, null = None
+    supersetGroupId: number | null;
     restTimerSeconds: number;
     sets: ActiveSet[];
 }
+
+// Helper to round weights to the nearest loadable 2.5kg increment
+const roundToNearest2Point5 = (weight: number) => Math.max(20, Math.round(weight / 2.5) * 2.5);
 
 interface WorkoutState {
     isActive: boolean;
@@ -48,6 +51,7 @@ interface WorkoutState {
     ) => void;
     updateExerciseNotes: (workoutExerciseId: string, notes: string) => void;
     toggleSuperset: (workoutExerciseId: string) => void;
+    generateWarmupSets: (workoutExerciseId: string, workingWeight: number) => void;
     removeExercise: (workoutExerciseId: string) => void;
     addSet: (workoutExerciseId: string) => void;
     removeSet: (workoutExerciseId: string, setId: string) => void;
@@ -198,6 +202,52 @@ export const useWorkoutStore = create<WorkoutState>()(
                         const nextGroup =
                             ex.supersetGroupId === null ? 1 : ex.supersetGroupId === 1 ? 2 : null;
                         return { ...ex, supersetGroupId: nextGroup };
+                    }),
+                })),
+
+            generateWarmupSets: (workoutExerciseId, workingWeight) =>
+                set((state) => ({
+                    exercises: state.exercises.map((ex) => {
+                        if (ex.id !== workoutExerciseId) return ex;
+
+                        // Remove existing uncompleted warmup sets before inserting fresh ones
+                        const nonWarmupSets = ex.sets.filter((s) => s.setType !== 'WARMUP' || s.isCompleted);
+
+                        const warmupStages: { weight: number; reps: number }[] = [];
+                        if (workingWeight > 25) {
+                            warmupStages.push({ weight: 20, reps: 10 }); // Empty bar
+                        }
+                        if (workingWeight >= 40) {
+                            warmupStages.push({ weight: roundToNearest2Point5(workingWeight * 0.5), reps: 8 });
+                            warmupStages.push({ weight: roundToNearest2Point5(workingWeight * 0.7), reps: 5 });
+                            warmupStages.push({ weight: roundToNearest2Point5(workingWeight * 0.85), reps: 2 });
+                        } else {
+                            warmupStages.push({
+                                weight: Math.max(5, Math.round((workingWeight * 0.6) / 2.5) * 2.5),
+                                reps: 8,
+                            });
+                        }
+
+                        const newWarmupSets: ActiveSet[] = warmupStages.map((stage, idx) => ({
+                            id: crypto.randomUUID(),
+                            setNumber: idx + 1,
+                            setType: 'WARMUP',
+                            weight: String(stage.weight),
+                            reps: String(stage.reps),
+                            rpe: '',
+                            previousText: 'Warm-up',
+                            isCompleted: false,
+                        }));
+
+                        const combined = [...newWarmupSets, ...nonWarmupSets].map((s, idx) => ({
+                            ...s,
+                            setNumber: idx + 1,
+                        }));
+
+                        return {
+                            ...ex,
+                            sets: combined,
+                        };
                     }),
                 })),
 
