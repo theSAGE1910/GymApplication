@@ -1253,7 +1253,13 @@ export default function HevyCloneApp() {
                         value={customExMuscle}
                         onChange={(e) => setCustomExMuscle(e.target.value)}
                         className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                    >
+                      {MUSCLE_GROUPS.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
