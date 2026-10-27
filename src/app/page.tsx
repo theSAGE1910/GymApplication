@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useWorkoutStore, SetType } from '@/store/useWorkoutStore';
+import { supabase } from '@/lib/supabase';
 import {
   Dumbbell,
   Plus,
@@ -19,6 +20,9 @@ import {
   TrendingUp,
   Calculator,
   Link2,
+  User as UserIcon,
+  LogOut,
+  Flame,
 } from 'lucide-react';
 
 interface DbExercise {
@@ -98,6 +102,15 @@ export default function HevyCloneApp() {
   const [pastWorkouts, setPastWorkouts] = useState<any[]>([]);
   const [selectedAnalyticsExId, setSelectedAnalyticsExId] = useState<string>('');
 
+  // Auth State
+  const [userEmail, setUserEmail] = useState<string>('athlete@hevy-clone.local');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authInputEmail, setAuthInputEmail] = useState('');
+  const [authInputPassword, setAuthInputPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
   // Modals
   const [showExerciseModal, setShowExerciseModal] = useState(false);
   const [showCreateExerciseModal, setShowCreateExerciseModal] = useState(false);
@@ -128,14 +141,15 @@ export default function HevyCloneApp() {
   const [restRemainingSec, setRestRemainingSec] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-    fetchExercises();
-    fetchRoutines();
-    fetchWorkouts();
-  }, []);
+  const authHeaders = useCallback(
+      (extra: Record<string, string> = {}) => ({
+        'x-user-email': userEmail,
+        ...extra,
+      }),
+      [userEmail]
+  );
 
-  const fetchExercises = () => {
+  const fetchExercises = useCallback(() => {
     fetch('/api/exercises')
         .then((res) => res.json())
         .then((data) => {
@@ -146,19 +160,42 @@ export default function HevyCloneApp() {
             }
           }
         });
-  };
+  }, [selectedAnalyticsExId]);
 
-  const fetchRoutines = () => {
-    fetch('/api/routines')
+  const fetchRoutines = useCallback(() => {
+    fetch('/api/routines', { headers: authHeaders() })
         .then((res) => res.json())
         .then((data) => Array.isArray(data) && setRoutines(data));
-  };
+  }, [authHeaders]);
 
-  const fetchWorkouts = () => {
-    fetch('/api/workouts')
+  const fetchWorkouts = useCallback(() => {
+    fetch('/api/workouts', { headers: authHeaders() })
         .then((res) => res.json())
         .then((data) => Array.isArray(data) && setPastWorkouts(data));
-  };
+  }, [authHeaders]);
+
+  // Check Supabase session on mount
+  useEffect(() => {
+    setMounted(true);
+    if (supabase) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user?.email) {
+          setUserEmail(session.user.email);
+        }
+      });
+      const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+        setUserEmail(session?.user?.email || 'athlete@hevy-clone.local');
+      });
+      return () => listener.subscription.unsubscribe();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    fetchExercises();
+    fetchRoutines();
+    fetchWorkouts();
+  }, [mounted, userEmail, fetchExercises, fetchRoutines, fetchWorkouts]);
 
   // Live Workout Duration & Rest Timer Ticker
   useEffect(() => {
@@ -190,7 +227,53 @@ export default function HevyCloneApp() {
     return `${mins}:${remSec < 10 ? '0' : ''}${remSec}`;
   };
 
-  // Calculate plates per side for the Plate Calculator
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+
+    // Fallback if NEXT_PUBLIC_SUPABASE_URL isn't set yet: allow instant profile switching by email
+    if (!supabase) {
+      if (authInputEmail.includes('@')) {
+        setUserEmail(authInputEmail.toLowerCase().trim());
+        setShowAuthModal(false);
+      } else {
+        setAuthError('Please enter a valid email address.');
+      }
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      if (authMode === 'signup') {
+        const { error } = await supabase.auth.signUp({
+          email: authInputEmail,
+          password: authInputPassword,
+        });
+        if (error) throw error;
+        setShowAuthModal(false);
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: authInputEmail,
+          password: authInputPassword,
+        });
+        if (error) throw error;
+        setShowAuthModal(false);
+      }
+    } catch (err: any) {
+      setAuthError(err.message || 'Authentication failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setUserEmail('athlete@hevy-clone.local');
+    setShowAuthModal(false);
+  };
+
   const calculatePlatesPerSide = (targetTotal: number, barbell: number) => {
     const platesPerSide: { weight: number; color: string }[] = [];
     if (targetTotal <= barbell) return platesPerSide;
@@ -211,7 +294,7 @@ export default function HevyCloneApp() {
     if (!customExName.trim()) return;
     const res = await fetch('/api/exercises', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         name: customExName,
         primaryMuscle: customExMuscle,
@@ -233,7 +316,9 @@ export default function HevyCloneApp() {
     setShowExerciseModal(false);
     setSearchQuery('');
     try {
-      const res = await fetch(`/api/exercises/history?exerciseId=${ex.id}`);
+      const res = await fetch(`/api/exercises/history?exerciseId=${ex.id}`, {
+        headers: authHeaders(),
+      });
       const prevSets = res.ok ? await res.json() : [];
       addExercise(ex, Array.isArray(prevSets) ? prevSets : []);
     } catch {
@@ -248,7 +333,9 @@ export default function HevyCloneApp() {
       const currentExercises = useWorkoutStore.getState().exercises;
       for (const we of currentExercises) {
         try {
-          const res = await fetch(`/api/exercises/history?exerciseId=${we.exerciseId}`);
+          const res = await fetch(`/api/exercises/history?exerciseId=${we.exerciseId}`, {
+            headers: authHeaders(),
+          });
           if (res.ok) {
             const prevSets = await res.json();
             if (Array.isArray(prevSets) && prevSets.length > 0) {
@@ -269,7 +356,7 @@ export default function HevyCloneApp() {
     }
     const res = await fetch('/api/routines', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         name: draftRoutineName,
         exercises: draftRoutineExercises,
@@ -285,13 +372,13 @@ export default function HevyCloneApp() {
 
   const handleDeleteRoutine = async (id: string) => {
     if (!confirm('Delete this routine template?')) return;
-    await fetch(`/api/routines?id=${id}`, { method: 'DELETE' });
+    await fetch(`/api/routines?id=${id}`, { method: 'DELETE', headers: authHeaders() });
     fetchRoutines();
   };
 
   const handleDeleteWorkout = async (id: string) => {
     if (!confirm('Delete this workout log from your history?')) return;
-    await fetch(`/api/workouts?id=${id}`, { method: 'DELETE' });
+    await fetch(`/api/workouts?id=${id}`, { method: 'DELETE', headers: authHeaders() });
     fetchWorkouts();
   };
 
@@ -322,7 +409,7 @@ export default function HevyCloneApp() {
     try {
       const res = await fetch('/api/workouts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ workoutName, startTime, exercises }),
       });
       if (res.ok) {
@@ -343,11 +430,38 @@ export default function HevyCloneApp() {
           ex.primaryMuscle.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // ================= ANALYTICS CALCULATIONS =================
+  // ================= ANALYTICS & HEATMAP CALCULATIONS =================
   const totalCompletedWorkouts = pastWorkouts.length;
   const lifetimeVolume = pastWorkouts.reduce((sum, w) => sum + (w.totalVolume || 0), 0);
 
-  // Muscle Group Set Distribution
+  // Build 84-day (12-week) consistency calendar heatmap
+  const workoutSetsByDay: Record<string, { sets: number; workouts: number }> = {};
+  pastWorkouts.forEach((w) => {
+    const dayKey = new Date(w.startTime).toISOString().split('T')[0];
+    if (!workoutSetsByDay[dayKey]) {
+      workoutSetsByDay[dayKey] = { sets: 0, workouts: 0 };
+    }
+    workoutSetsByDay[dayKey].sets += w.totalSets || 0;
+    workoutSetsByDay[dayKey].workouts += 1;
+  });
+
+  const heatmapDays: { dateKey: string; label: string; sets: number; workouts: number }[] = [];
+  const today = new Date();
+  for (let i = 83; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const key = d.toISOString().split('T')[0];
+    const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    heatmapDays.push({
+      dateKey: key,
+      label,
+      sets: workoutSetsByDay[key]?.sets || 0,
+      workouts: workoutSetsByDay[key]?.workouts || 0,
+    });
+  }
+
+  const activeDaysLast12Weeks = heatmapDays.filter((d) => d.workouts > 0).length;
+
   const muscleCounts: Record<string, number> = {};
   let totalLoggedSets = 0;
   pastWorkouts.forEach((w) => {
@@ -419,6 +533,19 @@ export default function HevyCloneApp() {
               <span className="hidden sm:inline">Plates</span>
             </button>
 
+            {!isActive && (
+                <button
+                    onClick={() => setShowAuthModal(true)}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-2 rounded-lg transition flex items-center gap-1.5 text-xs font-semibold"
+                    title="Account & Login"
+                >
+                  <UserIcon className="w-4 h-4 text-emerald-400" />
+                  <span className="max-w-[90px] truncate hidden sm:inline">
+                {userEmail === 'athlete@hevy-clone.local' ? 'Sign In' : userEmail.split('@')[0]}
+              </span>
+                </button>
+            )}
+
             {isActive && (
                 <button
                     onClick={handleFinishWorkout}
@@ -433,7 +560,7 @@ export default function HevyCloneApp() {
 
         <main className="max-w-2xl mx-auto p-4 space-y-6">
           {activeTab === 'analytics' && !isActive ? (
-              /* ================= ANALYTICS & PR DASHBOARD ================= */
+              /* ================= ANALYTICS, HEATMAP & PR DASHBOARD ================= */
               <div className="space-y-6">
                 {/* SUMMARY CARDS */}
                 <div className="grid grid-cols-3 gap-3">
@@ -450,6 +577,53 @@ export default function HevyCloneApp() {
                   <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
                     <p className="text-xs text-slate-400">Total Sets</p>
                     <p className="text-2xl font-bold text-emerald-400 mt-1">{totalLoggedSets}</p>
+                  </div>
+                </div>
+
+                {/* 12-WEEK CONSISTENCY CALENDAR HEATMAP */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-bold text-base flex items-center gap-2">
+                      <Flame className="w-5 h-5 text-amber-400" />
+                      12-Week Consistency Heatmap
+                    </h2>
+                    <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-full">
+                  {activeDaysLast12Weeks} Active Days
+                </span>
+                  </div>
+
+                  <div className="grid grid-cols-12 gap-1.5 pt-1">
+                    {heatmapDays.map((day) => {
+                      const colorClass =
+                          day.sets === 0
+                              ? 'bg-slate-800/80 border-slate-800'
+                              : day.sets < 8
+                                  ? 'bg-emerald-900/80 border-emerald-700/60'
+                                  : day.sets < 16
+                                      ? 'bg-emerald-600 border-emerald-500'
+                                      : 'bg-emerald-400 border-emerald-300 shadow-sm shadow-emerald-400/30';
+
+                      return (
+                          <div
+                              key={day.dateKey}
+                              title={`${day.label}: ${day.workouts} workout(s), ${day.sets} sets`}
+                              className={`aspect-square rounded-md border ${colorClass} transition hover:scale-110`}
+                          />
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                    <span>12 weeks ago</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>Rest</span>
+                      <span className="w-3 h-3 rounded-sm bg-slate-800 inline-block" />
+                      <span className="w-3 h-3 rounded-sm bg-emerald-900 inline-block" />
+                      <span className="w-3 h-3 rounded-sm bg-emerald-600 inline-block" />
+                      <span className="w-3 h-3 rounded-sm bg-emerald-400 inline-block" />
+                      <span>High Sets</span>
+                    </div>
+                    <span>Today</span>
                   </div>
                 </div>
 
@@ -488,7 +662,7 @@ export default function HevyCloneApp() {
                   )}
                 </div>
 
-                {/* EXERCISE PRs & 1RM PROGRESSION */}
+                {/* EXERCISE PRs & PROGRESSION */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-5">
                   <div className="flex items-center justify-between">
                     <h2 className="font-bold text-base flex items-center gap-2">
@@ -571,7 +745,12 @@ export default function HevyCloneApp() {
               /* ================= HOME / DASHBOARD VIEW ================= */
               <div className="space-y-8">
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                  <h2 className="text-lg font-bold">Quick Start</h2>
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-bold">Quick Start</h2>
+                    <span className="text-xs text-slate-400">
+                   Athlete: <strong className="text-slate-200">{userEmail.split('@')[0]}</strong>
+                </span>
+                  </div>
                   <button
                       onClick={() => startEmptyWorkout('Workout Session')}
                       className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition shadow-lg shadow-blue-600/20"
@@ -1016,6 +1195,104 @@ export default function HevyCloneApp() {
             </nav>
         )}
 
+        {/* SUPABASE AUTH / USER ACCOUNT MODAL */}
+        {showAuthModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg flex items-center gap-2">
+                    <UserIcon className="w-5 h-5 text-emerald-400" />
+                    Athlete Account
+                  </h3>
+                  <button
+                      onClick={() => setShowAuthModal(false)}
+                      className="p-1 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] text-slate-400">Currently Logged In As</p>
+                    <p className="text-sm font-bold text-emerald-400">{userEmail}</p>
+                  </div>
+                  {userEmail !== 'athlete@hevy-clone.local' && (
+                      <button
+                          onClick={handleSignOut}
+                          className="bg-slate-800 hover:bg-red-950/60 text-slate-300 hover:text-red-400 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        Sign Out
+                      </button>
+                  )}
+                </div>
+
+                <div className="flex gap-2 bg-slate-800 p-1 rounded-xl">
+                  <button
+                      onClick={() => setAuthMode('login')}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${
+                          authMode === 'login' ? 'bg-blue-600 text-white' : 'text-slate-400'
+                      }`}
+                  >
+                    Sign In
+                  </button>
+                  <button
+                      onClick={() => setAuthMode('signup')}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${
+                          authMode === 'signup' ? 'bg-blue-600 text-white' : 'text-slate-400'
+                      }`}
+                  >
+                    Create Account
+                  </button>
+                </div>
+
+                <form onSubmit={handleAuthSubmit} className="space-y-3">
+                  <div>
+                    <label className="text-xs text-slate-400 font-semibold">Email Address</label>
+                    <input
+                        type="email"
+                        required
+                        placeholder="you@university.edu"
+                        value={authInputEmail}
+                        onChange={(e) => setAuthInputEmail(e.target.value)}
+                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  {supabase && (
+                      <div>
+                        <label className="text-xs text-slate-400 font-semibold">Password</label>
+                        <input
+                            type="password"
+                            required
+                            minLength={6}
+                            placeholder="••••••••"
+                            value={authInputPassword}
+                            onChange={(e) => setAuthInputPassword(e.target.value)}
+                            className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                  )}
+
+                  {authError && <p className="text-xs text-red-400 font-semibold">{authError}</p>}
+
+                  <button
+                      type="submit"
+                      disabled={authLoading}
+                      className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl text-sm transition"
+                  >
+                    {authLoading
+                        ? 'Please wait...'
+                        : authMode === 'signup'
+                            ? 'Create Free Account'
+                            : 'Sign In'}
+                  </button>
+                </form>
+              </div>
+            </div>
+        )}
+
         {/* BARBELL PLATE CALCULATOR MODAL */}
         {showPlateCalc && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1237,7 +1514,7 @@ export default function HevyCloneApp() {
 
                 <input
                     type="text"
-                    placeholder="Search exercise or muscle (e.g. Bench, Chest)..."
+                    placeholder="Search 50+ exercises or muscles (e.g. Squat, Back, Cable)..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1310,7 +1587,7 @@ export default function HevyCloneApp() {
                     <label className="text-xs text-slate-400 font-semibold">Exercise Name</label>
                     <input
                         type="text"
-                        placeholder="e.g., Bayesian Cable Curl"
+                        placeholder="e.g., Pendulum Squat"
                         value={customExName}
                         onChange={(e) => setCustomExName(e.target.value)}
                         className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
