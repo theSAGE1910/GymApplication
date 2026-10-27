@@ -18,6 +18,7 @@ import {
   BarChart3,
   TrendingUp,
   Calculator,
+  Link2,
 } from 'lucide-react';
 
 interface DbExercise {
@@ -78,6 +79,8 @@ export default function HevyCloneApp() {
     updateWorkoutName,
     addExercise,
     setExercisePreviousSets,
+    updateExerciseNotes,
+    toggleSuperset,
     removeExercise,
     addSet,
     removeSet,
@@ -284,6 +287,12 @@ export default function HevyCloneApp() {
     if (!confirm('Delete this routine template?')) return;
     await fetch(`/api/routines?id=${id}`, { method: 'DELETE' });
     fetchRoutines();
+  };
+
+  const handleDeleteWorkout = async (id: string) => {
+    if (!confirm('Delete this workout log from your history?')) return;
+    await fetch(`/api/workouts?id=${id}`, { method: 'DELETE' });
+    fetchWorkouts();
   };
 
   const liveStats = exercises.reduce(
@@ -671,7 +680,7 @@ export default function HevyCloneApp() {
                                     })}
                                   </p>
                                 </div>
-                                <div className="flex gap-4 text-right">
+                                <div className="flex items-center gap-4 text-right">
                                   <div>
                                     <p className="text-xs text-slate-400">Volume</p>
                                     <p className="font-semibold text-sm">{w.totalVolume} kg</p>
@@ -680,6 +689,13 @@ export default function HevyCloneApp() {
                                     <p className="text-xs text-slate-400">Sets</p>
                                     <p className="font-semibold text-sm">{w.totalSets}</p>
                                   </div>
+                                  <button
+                                      onClick={() => handleDeleteWorkout(w.id)}
+                                      className="text-slate-600 hover:text-red-400 p-1"
+                                      title="Delete Workout"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
                                 </div>
                               </div>
 
@@ -751,43 +767,86 @@ export default function HevyCloneApp() {
                 {exercises.map((ex) => (
                     <div
                         key={ex.id}
-                        className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4"
+                        className={`bg-slate-900 border rounded-2xl p-4 space-y-3 transition ${
+                            ex.supersetGroupId === 1
+                                ? 'border-l-4 border-l-purple-500 border-slate-800'
+                                : ex.supersetGroupId === 2
+                                    ? 'border-l-4 border-l-pink-500 border-slate-800'
+                                    : 'border-slate-800'
+                        }`}
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-start justify-between">
                         <div>
-                          <h3 className="font-bold text-blue-400 text-base">{ex.name}</h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-blue-400 text-base">{ex.name}</h3>
+                            {ex.supersetGroupId && (
+                                <span
+                                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                        ex.supersetGroupId === 1
+                                            ? 'bg-purple-500/20 text-purple-300'
+                                            : 'bg-pink-500/20 text-pink-300'
+                                    }`}
+                                >
+                          Superset {ex.supersetGroupId === 1 ? 'A' : 'B'}
+                        </span>
+                            )}
+                          </div>
                           <span className="text-xs text-slate-400 uppercase tracking-wider">
                       {ex.primaryMuscle} • {ex.equipment}
                     </span>
                         </div>
-                        <button
-                            onClick={() => removeExercise(ex.id)}
-                            className="text-slate-500 hover:text-red-400 p-1.5"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                              onClick={() => toggleSuperset(ex.id)}
+                              title="Toggle Superset Group (None -> A -> B)"
+                              className={`p-1.5 rounded-lg transition ${
+                                  ex.supersetGroupId
+                                      ? 'bg-purple-500/20 text-purple-300'
+                                      : 'text-slate-500 hover:text-slate-300'
+                              }`}
+                          >
+                            <Link2 className="w-4 h-4" />
+                          </button>
+                          <button
+                              onClick={() => removeExercise(ex.id)}
+                              className="text-slate-500 hover:text-red-400 p-1.5"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <div className="grid grid-cols-12 gap-1.5 text-[11px] font-semibold text-slate-400 px-1">
-                          <div className="col-span-2">SET</div>
+                      {/* EXERCISE NOTES */}
+                      <input
+                          type="text"
+                          placeholder="Add exercise notes (e.g. seat height 4, slow eccentric)..."
+                          value={ex.notes || ''}
+                          onChange={(e) => updateExerciseNotes(ex.id, e.target.value)}
+                          className="w-full bg-slate-950/60 border border-slate-800/80 rounded-xl px-3 py-1.5 text-xs text-slate-300 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                      />
+
+                      {/* SETS TABLE WITH RPE */}
+                      <div className="space-y-2 pt-1">
+                        <div className="grid grid-cols-12 gap-1 text-[10px] font-semibold text-slate-400 px-1">
+                          <div className="col-span-1">SET</div>
                           <div className="col-span-3 text-center">PREVIOUS</div>
                           <div className="col-span-3 text-center">KG</div>
                           <div className="col-span-2 text-center">REPS</div>
+                          <div className="col-span-1 text-center">RPE</div>
                           <div className="col-span-2 text-right">✓</div>
                         </div>
 
                         {ex.sets.map((s) => (
                             <div
                                 key={s.id}
-                                className={`grid grid-cols-12 gap-1.5 items-center p-1.5 rounded-xl transition ${
+                                className={`grid grid-cols-12 gap-1 items-center p-1.5 rounded-xl transition ${
                                     s.isCompleted ? 'bg-emerald-950/40 border border-emerald-800/40' : ''
                                 }`}
                             >
-                              <div className="col-span-2 flex items-center">
+                              <div className="col-span-1 flex items-center">
                                 <button
                                     onClick={() => cycleSetType(ex.id, s.id, s.setType)}
-                                    className={`w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center ${
+                                    className={`w-6 h-7 rounded-lg font-bold text-xs flex items-center justify-center ${
                                         s.setType === 'WARMUP'
                                             ? 'bg-amber-500/20 text-amber-400'
                                             : s.setType === 'DROPSET'
@@ -801,11 +860,11 @@ export default function HevyCloneApp() {
                                 </button>
                               </div>
 
-                              <div className="col-span-3 text-center text-xs text-slate-400 font-medium truncate">
+                              <div className="col-span-3 text-center text-[11px] text-slate-400 font-medium truncate">
                                 {s.previousText || '—'}
                               </div>
 
-                              <div className="col-span-3 relative">
+                              <div className="col-span-3">
                                 <input
                                     type="number"
                                     inputMode="decimal"
@@ -827,10 +886,21 @@ export default function HevyCloneApp() {
                                 />
                               </div>
 
+                              <div className="col-span-1">
+                                <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    placeholder="-"
+                                    value={s.rpe || ''}
+                                    onChange={(e) => updateSet(ex.id, s.id, 'rpe', e.target.value)}
+                                    className="w-full bg-slate-800/60 text-center rounded-lg py-1.5 text-xs text-amber-300 font-semibold focus:outline-none focus:ring-1 focus:ring-amber-400"
+                                />
+                              </div>
+
                               <div className="col-span-2 flex justify-end gap-1">
                                 <button
                                     onClick={() => toggleSetComplete(ex.id, s.id)}
-                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition ${
+                                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition ${
                                         s.isCompleted
                                             ? 'bg-emerald-500 text-slate-950'
                                             : 'bg-slate-800 text-slate-400 hover:text-white'
@@ -1148,7 +1218,7 @@ export default function HevyCloneApp() {
             <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
               <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl p-4 space-y-4 max-h-[80vh] flex flex-col">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-lg">Select Exercise</h3>
+                  <h3 className="font-bold text-lg">Select Exercise ({filteredExercises.length})</h3>
                   <div className="flex items-center gap-2">
                     <button
                         onClick={() => setShowCreateExerciseModal(true)}
