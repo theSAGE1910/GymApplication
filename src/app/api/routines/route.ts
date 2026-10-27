@@ -1,22 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAuthenticatedUser } from '@/lib/supabase';
 
-const DEFAULT_USER_EMAIL = 'athlete@hevy-clone.local';
-
-async function getOrCreateDefaultUser() {
-    let user = await prisma.user.findUnique({ where: { email: DEFAULT_USER_EMAIL } });
-    if (!user) {
-        user = await prisma.user.create({
-            data: { email: DEFAULT_USER_EMAIL, name: 'Student Athlete' },
-        });
-    }
-    return user;
-}
-
-// GET all saved routines
-export async function GET() {
+export async function GET(req: Request) {
     try {
-        const user = await getOrCreateDefaultUser();
+        const user = await getAuthenticatedUser(req);
         const routines = await prisma.routine.findMany({
             where: { userId: user.id },
             orderBy: { createdAt: 'desc' },
@@ -42,7 +30,7 @@ export async function POST(req: Request) {
     try {
         const body = await req.json();
         const { name, notes, exercises } = body;
-        const user = await getOrCreateDefaultUser();
+        const user = await getAuthenticatedUser(req);
 
         if (!name || !exercises || exercises.length === 0) {
             return NextResponse.json(

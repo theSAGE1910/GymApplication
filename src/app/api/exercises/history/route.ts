@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-
-const DEFAULT_USER_EMAIL = 'athlete@hevy-clone.local';
+import { getAuthenticatedUser } from '@/lib/supabase';
 
 export async function GET(req: Request) {
     try {
@@ -12,8 +11,7 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: 'Missing exerciseId' }, { status: 400 });
         }
 
-        const user = await prisma.user.findUnique({ where: { email: DEFAULT_USER_EMAIL } });
-        if (!user) return NextResponse.json([]);
+        const user = await getAuthenticatedUser(req);
 
         // Find the most recent completed WorkoutExercise for this user + exerciseId
         const lastWorkoutExercise = await prisma.workoutExercise.findFirst({

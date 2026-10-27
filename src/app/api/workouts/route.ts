@@ -1,25 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAuthenticatedUser } from '@/lib/supabase';
 
-const DEFAULT_USER_EMAIL = 'athlete@hevy-clone.local';
-
-async function getOrCreateDefaultUser() {
-    let user = await prisma.user.findUnique({ where: { email: DEFAULT_USER_EMAIL } });
-    if (!user) {
-        user = await prisma.user.create({
-            data: {
-                email: DEFAULT_USER_EMAIL,
-                name: 'Student Athlete',
-            },
-        });
-    }
-    return user;
-}
-
-// GET: Fetch past completed workouts
-export async function GET() {
+export async function GET(req: Request) {
     try {
-        const user = await getOrCreateDefaultUser();
+        const user = await getAuthenticatedUser(req);
         const workouts = await prisma.workout.findMany({
             where: { userId: user.id },
             orderBy: { startTime: 'desc' },
@@ -32,7 +17,7 @@ export async function GET() {
                     },
                 },
             },
-            take: 30,
+            take: 60,
         });
         return NextResponse.json(workouts);
     } catch (error) {
@@ -46,7 +31,7 @@ export async function POST(req: Request) {
     try {
         const body = await req.json();
         const { workoutName, startTime, exercises } = body;
-        const user = await getOrCreateDefaultUser();
+        const user = await getAuthenticatedUser(req);
 
         let totalVolume = 0;
         let totalSets = 0;
@@ -119,10 +104,10 @@ export async function POST(req: Request) {
             formattedExercises.push({
                 exerciseId: ex.exerciseId,
                 orderIndex: index,
+                supersetGroupId: ex.supersetGroupId || null,
                 notes: ex.notes || null,
                 restTimerSeconds: ex.restTimerSeconds || 90,
                 sets: { create: setsData },
-                supersetGroupId: ex.supersetGroupId || null,
             });
         }
 
