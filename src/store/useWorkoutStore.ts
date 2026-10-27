@@ -21,6 +21,7 @@ export interface ActiveWorkoutExercise {
     primaryMuscle: string;
     equipment: string;
     notes: string;
+    supersetGroupId: number | null; // 1 = Superset A, 2 = Superset B, null = None
     restTimerSeconds: number;
     sets: ActiveSet[];
 }
@@ -45,6 +46,8 @@ interface WorkoutState {
         workoutExerciseId: string,
         previousSets: { weight: number | null; reps: number | null }[]
     ) => void;
+    updateExerciseNotes: (workoutExerciseId: string, notes: string) => void;
+    toggleSuperset: (workoutExerciseId: string) => void;
     removeExercise: (workoutExerciseId: string) => void;
     addSet: (workoutExerciseId: string) => void;
     removeSet: (workoutExerciseId: string, setId: string) => void;
@@ -94,6 +97,7 @@ export const useWorkoutStore = create<WorkoutState>()(
                         primaryMuscle: re.exercise.primaryMuscle,
                         equipment: re.exercise.equipment,
                         notes: re.notes || '',
+                        supersetGroupId: re.supersetGroupId || null,
                         restTimerSeconds: re.restTimerSeconds || 90,
                         sets: re.sets.map((s: any, idx: number) => ({
                             id: crypto.randomUUID(),
@@ -150,6 +154,7 @@ export const useWorkoutStore = create<WorkoutState>()(
                                 primaryMuscle: exercise.primaryMuscle,
                                 equipment: exercise.equipment,
                                 notes: '',
+                                supersetGroupId: null,
                                 restTimerSeconds: 90,
                                 sets: initialSets,
                             },
@@ -176,6 +181,23 @@ export const useWorkoutStore = create<WorkoutState>()(
                                 };
                             }),
                         };
+                    }),
+                })),
+
+            updateExerciseNotes: (workoutExerciseId, notes) =>
+                set((state) => ({
+                    exercises: state.exercises.map((ex) =>
+                        ex.id === workoutExerciseId ? { ...ex, notes } : ex
+                    ),
+                })),
+
+            toggleSuperset: (workoutExerciseId) =>
+                set((state) => ({
+                    exercises: state.exercises.map((ex) => {
+                        if (ex.id !== workoutExerciseId) return ex;
+                        const nextGroup =
+                            ex.supersetGroupId === null ? 1 : ex.supersetGroupId === 1 ? 2 : null;
+                        return { ...ex, supersetGroupId: nextGroup };
                     }),
                 })),
 
