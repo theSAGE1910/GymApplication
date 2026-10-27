@@ -122,6 +122,7 @@ export async function POST(req: Request) {
                 notes: ex.notes || null,
                 restTimerSeconds: ex.restTimerSeconds || 90,
                 sets: { create: setsData },
+                supersetGroupId: ex.supersetGroupId || null,
             });
         }
 
@@ -150,5 +151,20 @@ export async function POST(req: Request) {
     } catch (error) {
         console.error('Error saving workout:', error);
         return NextResponse.json({ error: 'Failed to save workout' }, { status: 500 });
+    }
+}
+
+// DELETE: Remove a past workout by ?id=...
+export async function DELETE(req: Request) {
+    try {
+        const { searchParams } = new URL(req.url);
+        const id = searchParams.get('id');
+        if (!id) return NextResponse.json({ error: 'Missing workout id' }, { status: 400 });
+
+        await prisma.workout.delete({ where: { id } });
+        return NextResponse.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting workout:', error);
+        return NextResponse.json({ error: 'Failed to delete workout' }, { status: 500 });
     }
 }
