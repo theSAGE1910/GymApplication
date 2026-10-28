@@ -26,11 +26,9 @@ import {
   Zap,
 } from 'lucide-react';
 import {
-  DbExercise,
-  Routine,
-  WorkoutLog,
-  DraftRoutineExercise,
-  SetType,
+  ActiveWorkoutExercise,
+  DbExercise, DraftRoutineExercise, Routine,
+  SetType, WorkoutLog,
 } from "@/types/workout";
 import {
   SET_TYPE_ORDER,
@@ -41,8 +39,7 @@ import {
 import {
   formatDuration,
   calculateEstimated1Rm,
-  calculatePlatesPerSide,
-  roundToNearest2Point5,
+  calculatePlatesPerSide, roundToNearest2Point5,
 } from '@/utils/calculations';
 
 
@@ -74,8 +71,8 @@ export default function HevyCloneApp() {
   const [mounted, setMounted] = useState(false);
   const [activeTab, setActiveTab] = useState<'workout' | 'analytics'>('workout');
   const [dbExercises, setDbExercises] = useState<DbExercise[]>([]);
-  const [routines, setRoutines] = useState<any[]>([]);
-  const [pastWorkouts, setPastWorkouts] = useState<any[]>([]);
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [pastWorkouts, setPastWorkouts] = useState<WorkoutLog[]>([]);
   const [selectedAnalyticsExId, setSelectedAnalyticsExId] = useState<string>('');
 
   // Auth State
@@ -111,15 +108,7 @@ export default function HevyCloneApp() {
 
   // Routine Builder Draft State
   const [draftRoutineName, setDraftRoutineName] = useState('');
-  const [draftRoutineExercises, setDraftRoutineExercises] = useState<
-      {
-        id: string;
-        exerciseId: string;
-        name: string;
-        sets: { weight: string; reps: string }[];
-      }[]
-  >([]);
-
+  const [draftRoutineExercises, setDraftRoutineExercises] = useState<DraftRoutineExercise[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [elapsedSec, setElapsedSec] = useState(0);
   const [restRemainingSec, setRestRemainingSec] = useState(0);
@@ -210,7 +199,7 @@ export default function HevyCloneApp() {
   const parsedCalcReps = parseInt(calcReps, 10) || 0;
   const calculated1Rm = calculateEstimated1Rm(parsedCalcWeight, parsedCalcReps);
 
-  const handleOpenWarmupGenerator = (ex: any) => {
+  const handleOpenWarmupGenerator = (ex: ActiveWorkoutExercise) => {
     // Default to the first normal set's weight if already entered, otherwise 80kg
     const firstWorkingSet = ex.sets.find((s: any) => s.setType === 'NORMAL' && parseFloat(s.weight) > 0);
     setWarmupTargetWeight(firstWorkingSet ? firstWorkingSet.weight : '80');
@@ -309,7 +298,7 @@ export default function HevyCloneApp() {
     }
   };
 
-  const handleStartRoutine = async (routine: any) => {
+  const handleStartRoutine = async (routine: Routine) => {
     startWorkoutFromRoutine(routine);
     setActiveTab('workout');
     setTimeout(async () => {
@@ -471,7 +460,7 @@ export default function HevyCloneApp() {
         we.sets.forEach((s: any) => {
           const wt = s.weight || 0;
           const rp = s.reps || 0;
-          const rm = s.estimated1Rm || (wt > 0 && rp > 0 ? Number((wt * (1 + rp / 30)).toFixed(1)) : 0);
+          const rm = s.estimated1Rm || calculateEstimated1Rm(wt, rp);
           const vol = wt * rp;
           if (wt > sessionMaxWeight) sessionMaxWeight = wt;
           if (rm > sessionMax1Rm) sessionMax1Rm = rm;
@@ -1305,19 +1294,19 @@ export default function HevyCloneApp() {
                   <div className="flex justify-between text-slate-300">
                     <span>Warm-up 2 (50%)</span>
                     <span className="font-bold">
-                  {Math.max(20, Math.round(((parseFloat(warmupTargetWeight) || 0) * 0.5) / 2.5) * 2.5)} kg × 8
+                  {roundToNearest2Point5((parseFloat(warmupTargetWeight) || 0) * 0.5)} kg × 8
                 </span>
                   </div>
                   <div className="flex justify-between text-slate-300">
                     <span>Warm-up 3 (70%)</span>
                     <span className="font-bold">
-                  {Math.max(20, Math.round(((parseFloat(warmupTargetWeight) || 0) * 0.7) / 2.5) * 2.5)} kg × 5
+                  {roundToNearest2Point5((parseFloat(warmupTargetWeight) || 0) * 0.7)} kg × 5
                 </span>
                   </div>
                   <div className="flex justify-between text-slate-300">
                     <span>Warm-up 4 (85%)</span>
                     <span className="font-bold">
-                  {Math.max(20, Math.round(((parseFloat(warmupTargetWeight) || 0) * 0.85) / 2.5) * 2.5)} kg × 2
+                  {roundToNearest2Point5((parseFloat(warmupTargetWeight) || 0) * 0.85)} kg × 2
                 </span>
                   </div>
                 </div>
