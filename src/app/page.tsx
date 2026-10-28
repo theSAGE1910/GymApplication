@@ -42,7 +42,6 @@ import {
   calculatePlatesPerSide, roundToNearest2Point5,
 } from '@/utils/calculations';
 
-
 export default function HevyCloneApp() {
   const {
     isActive,

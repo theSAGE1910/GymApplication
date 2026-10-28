@@ -72,7 +72,7 @@ export const useWorkoutStore = create<WorkoutState>()(
                     workoutName: routine.name,
                     startTime: Date.now(),
                     restEndTime: null,
-                    exercises: routine.exercises.map((re: any) => ({
+                    exercises: routine.exercises.map((re) => ({
                         id: crypto.randomUUID(),
                         exerciseId: re.exercise.id,
                         name: re.exercise.name,
@@ -81,7 +81,7 @@ export const useWorkoutStore = create<WorkoutState>()(
                         notes: re.notes || '',
                         supersetGroupId: re.supersetGroupId || null,
                         restTimerSeconds: re.restTimerSeconds || 90,
-                        sets: re.sets.map((s: any, idx: number) => ({
+                        sets: re.sets.map((s, idx) => ({
                             id: crypto.randomUUID(),
                             setNumber: idx + 1,
                             setType: s.setType || 'NORMAL',
