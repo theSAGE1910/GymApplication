@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { useWorkoutStore, SetType } from '@/store/useWorkoutStore';
+import { useWorkoutStore } from '@/store/useWorkoutStore';
 import { supabase } from '@/lib/supabase';
 import {
   Dumbbell,
@@ -25,63 +25,26 @@ import {
   Flame,
   Zap,
 } from 'lucide-react';
+import {
+  DbExercise,
+  Routine,
+  WorkoutLog,
+  DraftRoutineExercise,
+  SetType,
+} from "@/types/workout";
+import {
+  SET_TYPE_ORDER,
+  MUSCLE_GROUPS,
+  EQUIPMENT_TYPES,
+  REP_MAX_PERCENTAGES,
+} from '@/constants/gym';
+import {
+  formatDuration,
+  calculateEstimated1Rm,
+  calculatePlatesPerSide,
+  roundToNearest2Point5,
+} from '@/utils/calculations';
 
-interface DbExercise {
-  id: string;
-  name: string;
-  primaryMuscle: string;
-  equipment: string;
-  isCustom?: boolean;
-}
-
-const SET_TYPE_Order: SetType[] = ['NORMAL', 'WARMUP', 'DROPSET', 'FAILURE'];
-
-const MUSCLE_GROUPS = [
-  'CHEST',
-  'BACK',
-  'SHOULDERS',
-  'BICEPS',
-  'TRICEPS',
-  'QUADRICEPS',
-  'HAMSTRINGS',
-  'GLUTES',
-  'CALVES',
-  'ABS',
-  'FOREARMS',
-  'FULL_BODY',
-];
-
-const EQUIPMENT_TYPES = [
-  'BARBELL',
-  'DUMBBELL',
-  'MACHINE',
-  'CABLE',
-  'BODYWEIGHT',
-  'KETTLEBELL',
-  'BAND',
-  'OTHER',
-];
-
-const STANDARD_PLATES = [
-  { weight: 25, color: 'bg-red-600 text-white h-24' },
-  { weight: 20, color: 'bg-blue-600 text-white h-24' },
-  { weight: 15, color: 'bg-amber-400 text-slate-950 h-20' },
-  { weight: 10, color: 'bg-emerald-500 text-slate-950 h-16' },
-  { weight: 5, color: 'bg-slate-100 text-slate-950 h-14' },
-  { weight: 2.5, color: 'bg-slate-700 text-white h-12' },
-  { weight: 1.25, color: 'bg-slate-500 text-white h-10' },
-];
-
-const REP_MAX_PERCENTAGES = [
-  { pct: 100, estReps: '1 RM' },
-  { pct: 95, estReps: '2 RM' },
-  { pct: 90, estReps: '4 RM' },
-  { pct: 85, estReps: '6 RM' },
-  { pct: 80, estReps: '8 RM' },
-  { pct: 75, estReps: '10 RM' },
-  { pct: 70, estReps: '12 RM' },
-  { pct: 65, estReps: '15 RM' },
-];
 
 export default function HevyCloneApp() {
   const {
@@ -242,21 +205,10 @@ export default function HevyCloneApp() {
 
   if (!mounted) return null;
 
-  const formatDuration = (sec: number) => {
-    const mins = Math.floor(sec / 60);
-    const remSec = sec % 60;
-    return `${mins}:${remSec < 10 ? '0' : ''}${remSec}`;
-  };
-
   // Epley 1RM Calculation for the 1RM Calculator Modal
   const parsedCalcWeight = parseFloat(calcWeight) || 0;
   const parsedCalcReps = parseInt(calcReps, 10) || 0;
-  const calculated1Rm =
-      parsedCalcWeight > 0 && parsedCalcReps > 0
-          ? parsedCalcReps === 1
-              ? parsedCalcWeight
-              : Number((parsedCalcWeight * (1 + parsedCalcReps / 30)).toFixed(1))
-          : 0;
+  const calculated1Rm = calculateEstimated1Rm(parsedCalcWeight, parsedCalcReps);
 
   const handleOpenWarmupGenerator = (ex: any) => {
     // Default to the first normal set's weight if already entered, otherwise 80kg
@@ -317,20 +269,6 @@ export default function HevyCloneApp() {
     }
     setUserEmail('athlete@hevy-clone.local');
     setShowAuthModal(false);
-  };
-
-  const calculatePlatesPerSide = (targetTotal: number, barbell: number) => {
-    const platesPerSide: { weight: number; color: string }[] = [];
-    if (targetTotal <= barbell) return platesPerSide;
-    let remainingOneSide = (targetTotal - barbell) / 2;
-
-    for (const plate of STANDARD_PLATES) {
-      while (remainingOneSide >= plate.weight - 0.001) {
-        platesPerSide.push(plate);
-        remainingOneSide = Number((remainingOneSide - plate.weight).toFixed(2));
-      }
-    }
-    return platesPerSide;
   };
 
   const platesNeeded = calculatePlatesPerSide(parseFloat(plateCalcWeight) || 0, barWeight);
@@ -441,8 +379,8 @@ export default function HevyCloneApp() {
   );
 
   const cycleSetType = (workoutExId: string, setId: string, current: SetType) => {
-    const nextIndex = (SET_TYPE_Order.indexOf(current) + 1) % SET_TYPE_Order.length;
-    updateSet(workoutExId, setId, 'setType', SET_TYPE_Order[nextIndex]);
+    const nextIndex = (SET_TYPE_ORDER.indexOf(current) + 1) % SET_TYPE_ORDER.length;
+    updateSet(workoutExId, setId, 'setType', SET_TYPE_ORDER[nextIndex]);
   };
 
   const handleFinishWorkout = async () => {

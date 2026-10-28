@@ -1,33 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-
-export type SetType = 'WARMUP' | 'NORMAL' | 'DROPSET' | 'FAILURE';
-
-export interface ActiveSet {
-    id: string;
-    setNumber: number;
-    setType: SetType;
-    weight: string;
-    reps: string;
-    rpe: string;
-    previousText?: string;
-    isCompleted: boolean;
-}
-
-export interface ActiveWorkoutExercise {
-    id: string;
-    exerciseId: string;
-    name: string;
-    primaryMuscle: string;
-    equipment: string;
-    notes: string;
-    supersetGroupId: number | null;
-    restTimerSeconds: number;
-    sets: ActiveSet[];
-}
-
-// Helper to round weights to the nearest loadable 2.5kg increment
-const roundToNearest2Point5 = (weight: number) => Math.max(20, Math.round(weight / 2.5) * 2.5);
+import {
+    ActiveSet,
+    ActiveWorkoutExercise,
+    Routine,
+} from "@/types/workout";
+import { buildWarmupStages } from "@/utils/calculations";
 
 interface WorkoutState {
     isActive: boolean;
@@ -39,7 +17,7 @@ interface WorkoutState {
 
     // Actions
     startEmptyWorkout: (name?: string) => void;
-    startWorkoutFromRoutine: (routine: any) => void;
+    startWorkoutFromRoutine: (routine: Routine) => void;
     updateWorkoutName: (name: string) => void;
     addExercise: (
         exercise: { id: string; name: string; primaryMuscle: string; equipment: string },
@@ -213,20 +191,7 @@ export const useWorkoutStore = create<WorkoutState>()(
                         // Remove existing uncompleted warmup sets before inserting fresh ones
                         const nonWarmupSets = ex.sets.filter((s) => s.setType !== 'WARMUP' || s.isCompleted);
 
-                        const warmupStages: { weight: number; reps: number }[] = [];
-                        if (workingWeight > 25) {
-                            warmupStages.push({ weight: 20, reps: 10 }); // Empty bar
-                        }
-                        if (workingWeight >= 40) {
-                            warmupStages.push({ weight: roundToNearest2Point5(workingWeight * 0.5), reps: 8 });
-                            warmupStages.push({ weight: roundToNearest2Point5(workingWeight * 0.7), reps: 5 });
-                            warmupStages.push({ weight: roundToNearest2Point5(workingWeight * 0.85), reps: 2 });
-                        } else {
-                            warmupStages.push({
-                                weight: Math.max(5, Math.round((workingWeight * 0.6) / 2.5) * 2.5),
-                                reps: 8,
-                            });
-                        }
+                        const warmupStages = buildWarmupStages(workingWeight)
 
                         const newWarmupSets: ActiveSet[] = warmupStages.map((stage, idx) => ({
                             id: crypto.randomUUID(),

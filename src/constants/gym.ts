@@ -1,6 +1,6 @@
 import { SetType } from "@/types/workout";
 
-export const SET_TYPE_Order: SetType[] = ['NORMAL', 'WARMUP', 'DROPSET', 'FAILURE'];
+export const SET_TYPE_ORDER: SetType[] = ['NORMAL', 'WARMUP', 'DROPSET', 'FAILURE'];
 
 export const MUSCLE_GROUPS = [
     'CHEST',
