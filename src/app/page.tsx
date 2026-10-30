@@ -21,7 +21,6 @@ import {
   Calculator,
   Link2,
   User as UserIcon,
-  LogOut,
   Flame,
   Zap,
 } from 'lucide-react';
@@ -32,15 +31,20 @@ import {
 } from "@/types/workout";
 import {
   SET_TYPE_ORDER,
-  MUSCLE_GROUPS,
-  EQUIPMENT_TYPES,
-  REP_MAX_PERCENTAGES,
 } from '@/constants/gym';
 import {
   formatDuration,
   calculateEstimated1Rm,
-  calculatePlatesPerSide, roundToNearest2Point5,
 } from '@/utils/calculations';
+import {
+  OneRepMaxModal,
+  PlateCalculatorModal,
+  WarmupGeneratorModal,
+  AuthModal,
+  RoutineBuilderModal,
+  CreateExerciseModal,
+  ExercisePickerModal,
+} from '@/components/modals';
 
 export default function HevyCloneApp() {
   const {
@@ -78,38 +82,22 @@ export default function HevyCloneApp() {
   // Auth State
   const [userEmail, setUserEmail] = useState<string>('athlete@hevy-clone.local');
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
-  const [authInputEmail, setAuthInputEmail] = useState('');
-  const [authInputPassword, setAuthInputPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
 
   // Modals
   const [showExerciseModal, setShowExerciseModal] = useState(false);
   const [showCreateExerciseModal, setShowCreateExerciseModal] = useState(false);
   const [showRoutineModal, setShowRoutineModal] = useState(false);
   const [showPlateCalc, setShowPlateCalc] = useState(false);
-  const [plateCalcWeight, setPlateCalcWeight] = useState('100');
-  const [barWeight, setBarWeight] = useState(20);
 
   // 1RM Calculator & Warm-up Generator State
   const [show1RmModal, setShow1RmModal] = useState(false);
-  const [calcWeight, setCalcWeight] = useState('80');
-  const [calcReps, setCalcReps] = useState('5');
   const [warmupTargetExId, setWarmupTargetExId] = useState<string | null>(null);
   const [warmupTargetWeight, setWarmupTargetWeight] = useState('80');
 
   const [routinePickerMode, setRoutinePickerMode] = useState(false);
 
-  // Custom Exercise Form State
-  const [customExName, setCustomExName] = useState('');
-  const [customExMuscle, setCustomExMuscle] = useState('CHEST');
-  const [customExEquipment, setCustomExEquipment] = useState('BARBELL');
-
   // Routine Builder Draft State
-  const [draftRoutineName, setDraftRoutineName] = useState('');
   const [draftRoutineExercises, setDraftRoutineExercises] = useState<DraftRoutineExercise[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
   const [elapsedSec, setElapsedSec] = useState(0);
   const [restRemainingSec, setRestRemainingSec] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
@@ -194,11 +182,6 @@ export default function HevyCloneApp() {
 
   if (!mounted) return null;
 
-  // Epley 1RM Calculation for the 1RM Calculator Modal
-  const parsedCalcWeight = parseFloat(calcWeight) || 0;
-  const parsedCalcReps = parseInt(calcReps, 10) || 0;
-  const calculated1Rm = calculateEstimated1Rm(parsedCalcWeight, parsedCalcReps);
-
   const handleOpenWarmupGenerator = (ex: ActiveWorkoutExercise) => {
     // Default to the first normal set's weight if already entered, otherwise 80kg
     const firstWorkingSet = ex.sets.find((s: any) => s.setType === 'NORMAL' && parseFloat(s.weight) > 0);
@@ -206,87 +189,8 @@ export default function HevyCloneApp() {
     setWarmupTargetExId(ex.id);
   };
 
-  const handleConfirmGenerateWarmups = () => {
-    const wt = parseFloat(warmupTargetWeight) || 0;
-    if (!warmupTargetExId || wt <= 0) return;
-    generateWarmupSets(warmupTargetExId, wt);
-    setWarmupTargetExId(null);
-  };
-
-  const handleAuthSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-
-    // Fallback if NEXT_PUBLIC_SUPABASE_URL isn't set yet: allow instant profile switching by email
-    if (!supabase) {
-      if (authInputEmail.includes('@')) {
-        setUserEmail(authInputEmail.toLowerCase().trim());
-        setShowAuthModal(false);
-      } else {
-        setAuthError('Please enter a valid email address.');
-      }
-      return;
-    }
-
-    setAuthLoading(true);
-    try {
-      if (authMode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email: authInputEmail,
-          password: authInputPassword,
-        });
-        if (error) throw error;
-        setShowAuthModal(false);
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: authInputEmail,
-          password: authInputPassword,
-        });
-        if (error) throw error;
-        setShowAuthModal(false);
-      }
-    } catch (err: any) {
-      setAuthError(err.message || 'Authentication failed');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleSignOut = async () => {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-    setUserEmail('athlete@hevy-clone.local');
-    setShowAuthModal(false);
-  };
-
-  const platesNeeded = calculatePlatesPerSide(parseFloat(plateCalcWeight) || 0, barWeight);
-
-  const handleCreateCustomExercise = async () => {
-    if (!customExName.trim()) return;
-    const res = await fetch('/api/exercises', {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        name: customExName,
-        primaryMuscle: customExMuscle,
-        equipment: customExEquipment,
-      }),
-    });
-    if (res.ok) {
-      const created = await res.json();
-      setCustomExName('');
-      setShowCreateExerciseModal(false);
-      fetchExercises();
-      if (!routinePickerMode && isActive) {
-        handleSelectExerciseForWorkout(created);
-      }
-    }
-  };
-
   const handleSelectExerciseForWorkout = async (ex: DbExercise) => {
     setShowExerciseModal(false);
-    setSearchQuery('');
     try {
       const res = await fetch(`/api/exercises/history?exerciseId=${ex.id}`, {
         headers: authHeaders(),
@@ -319,27 +223,6 @@ export default function HevyCloneApp() {
         }
       }
     }, 50);
-  };
-
-  const handleSaveRoutine = async () => {
-    if (!draftRoutineName.trim() || draftRoutineExercises.length === 0) {
-      alert('Give your routine a name and add at least one exercise.');
-      return;
-    }
-    const res = await fetch('/api/routines', {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        name: draftRoutineName,
-        exercises: draftRoutineExercises,
-      }),
-    });
-    if (res.ok) {
-      setDraftRoutineName('');
-      setDraftRoutineExercises([]);
-      setShowRoutineModal(false);
-      fetchRoutines();
-    }
   };
 
   const handleDeleteRoutine = async (id: string) => {
@@ -395,12 +278,6 @@ export default function HevyCloneApp() {
       setIsSaving(false);
     }
   };
-
-  const filteredExercises = dbExercises.filter(
-      (ex) =>
-          ex.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          ex.primaryMuscle.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   // ================= ANALYTICS & HEATMAP CALCULATIONS =================
   const totalCompletedWorkouts = pastWorkouts.length;
@@ -1185,581 +1062,87 @@ export default function HevyCloneApp() {
         )}
 
         {/* 1RM & PERCENTAGE TABLE CALCULATOR MODAL */}
-        {show1RmModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-lg flex items-center gap-2">
-                    <Zap className="w-5 h-5 text-amber-400" />
-                    1RM & Rep-Max Calculator
-                  </h3>
-                  <button
-                      onClick={() => setShow1RmModal(false)}
-                      className="p-1 text-slate-400 hover:text-white"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-400 font-semibold">Weight Lifted (kg)</label>
-                    <input
-                        type="number"
-                        value={calcWeight}
-                        onChange={(e) => setCalcWeight(e.target.value)}
-                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 font-semibold">Reps Performed</label>
-                    <input
-                        type="number"
-                        value={calcReps}
-                        onChange={(e) => setCalcReps(e.target.value)}
-                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="bg-gradient-to-r from-blue-600/20 to-amber-500/20 border border-amber-500/40 rounded-xl p-4 text-center">
-                  <p className="text-xs text-slate-300 uppercase tracking-wider font-semibold">
-                    Estimated One-Rep Max (1RM)
-                  </p>
-                  <p className="text-3xl font-extrabold text-amber-400 mt-1">{calculated1Rm} kg</p>
-                </div>
-
-                <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
-                  <div className="grid grid-cols-3 text-[11px] font-bold text-slate-400 px-3 pb-1 border-b border-slate-800">
-                    <span>% OF 1RM</span>
-                    <span className="text-center">EST. REPS</span>
-                    <span className="text-right">TARGET WEIGHT</span>
-                  </div>
-                  {REP_MAX_PERCENTAGES.map((row) => {
-                    const targetWt =
-                        calculated1Rm > 0 ? Number(((calculated1Rm * row.pct) / 100).toFixed(1)) : 0;
-                    return (
-                        <div
-                            key={row.pct}
-                            className="grid grid-cols-3 items-center text-xs bg-slate-950/60 px-3 py-2 rounded-lg"
-                        >
-                          <span className="font-bold text-blue-400">{row.pct}%</span>
-                          <span className="text-center text-slate-300">{row.estReps}</span>
-                          <span className="text-right font-bold text-white">{targetWt} kg</span>
-                        </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-        )}
+        <OneRepMaxModal
+            isOpen={show1RmModal}
+            onClose={() => setShow1RmModal(false)}
+        />
 
         {/* WARM-UP SET GENERATOR MODAL */}
-        {warmupTargetExId && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-lg flex items-center gap-2">
-                    <Flame className="w-5 h-5 text-amber-400" />
-                    Warm-up Set Generator
-                  </h3>
-                  <button
-                      onClick={() => setWarmupTargetExId(null)}
-                      className="p-1 text-slate-400 hover:text-white"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <p className="text-xs text-slate-400">
-                  Enter your first working set weight. We&apos;ll automatically insert progressive warm-up sets (Empty Bar, 50%, 70%, 85%) rounded to the nearest 2.5 kg.
-                </p>
-
-                <div>
-                  <label className="text-xs text-slate-400 font-semibold">Working Weight (kg)</label>
-                  <input
-                      type="number"
-                      value={warmupTargetWeight}
-                      onChange={(e) => setWarmupTargetWeight(e.target.value)}
-                      className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
-                  />
-                </div>
-
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5 text-xs">
-                  <p className="font-semibold text-amber-400 mb-1">Preview Warm-up Pyramid:</p>
-                  <div className="flex justify-between text-slate-300">
-                    <span>Warm-up 1 (Bar)</span>
-                    <span className="font-bold">20 kg × 10</span>
-                  </div>
-                  <div className="flex justify-between text-slate-300">
-                    <span>Warm-up 2 (50%)</span>
-                    <span className="font-bold">
-                  {roundToNearest2Point5((parseFloat(warmupTargetWeight) || 0) * 0.5)} kg × 8
-                </span>
-                  </div>
-                  <div className="flex justify-between text-slate-300">
-                    <span>Warm-up 3 (70%)</span>
-                    <span className="font-bold">
-                  {roundToNearest2Point5((parseFloat(warmupTargetWeight) || 0) * 0.7)} kg × 5
-                </span>
-                  </div>
-                  <div className="flex justify-between text-slate-300">
-                    <span>Warm-up 4 (85%)</span>
-                    <span className="font-bold">
-                  {roundToNearest2Point5((parseFloat(warmupTargetWeight) || 0) * 0.85)} kg × 2
-                </span>
-                  </div>
-                </div>
-
-                <button
-                    onClick={handleConfirmGenerateWarmups}
-                    className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition"
-                >
-                  Insert Warm-up Sets
-                </button>
-              </div>
-            </div>
-        )}
+        <WarmupGeneratorModal
+            exerciseId={warmupTargetExId}
+            initialWeight={warmupTargetWeight}
+            onClose={() => setWarmupTargetExId(null)}
+            onGenerate={generateWarmupSets}
+        />
 
         {/* SUPABASE AUTH / USER ACCOUNT MODAL */}
-        {showAuthModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-lg flex items-center gap-2">
-                    <UserIcon className="w-5 h-5 text-emerald-400" />
-                    Athlete Account
-                  </h3>
-                  <button
-                      onClick={() => setShowAuthModal(false)}
-                      className="p-1 text-slate-400 hover:text-white"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-[11px] text-slate-400">Currently Logged In As</p>
-                    <p className="text-sm font-bold text-emerald-400">{userEmail}</p>
-                  </div>
-                  {userEmail !== 'athlete@hevy-clone.local' && (
-                      <button
-                          onClick={handleSignOut}
-                          className="bg-slate-800 hover:bg-red-950/60 text-slate-300 hover:text-red-400 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
-                      >
-                        <LogOut className="w-3.5 h-3.5" />
-                        Sign Out
-                      </button>
-                  )}
-                </div>
-
-                <div className="flex gap-2 bg-slate-800 p-1 rounded-xl">
-                  <button
-                      onClick={() => setAuthMode('login')}
-                      className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${
-                          authMode === 'login' ? 'bg-blue-600 text-white' : 'text-slate-400'
-                      }`}
-                  >
-                    Sign In
-                  </button>
-                  <button
-                      onClick={() => setAuthMode('signup')}
-                      className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${
-                          authMode === 'signup' ? 'bg-blue-600 text-white' : 'text-slate-400'
-                      }`}
-                  >
-                    Create Account
-                  </button>
-                </div>
-
-                <form onSubmit={handleAuthSubmit} className="space-y-3">
-                  <div>
-                    <label className="text-xs text-slate-400 font-semibold">Email Address</label>
-                    <input
-                        type="email"
-                        required
-                        placeholder="you@university.edu"
-                        value={authInputEmail}
-                        onChange={(e) => setAuthInputEmail(e.target.value)}
-                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  {supabase && (
-                      <div>
-                        <label className="text-xs text-slate-400 font-semibold">Password</label>
-                        <input
-                            type="password"
-                            required
-                            minLength={6}
-                            placeholder="••••••••"
-                            value={authInputPassword}
-                            onChange={(e) => setAuthInputPassword(e.target.value)}
-                            className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                  )}
-
-                  {authError && <p className="text-xs text-red-400 font-semibold">{authError}</p>}
-
-                  <button
-                      type="submit"
-                      disabled={authLoading}
-                      className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl text-sm transition"
-                  >
-                    {authLoading
-                        ? 'Please wait...'
-                        : authMode === 'signup'
-                            ? 'Create Free Account'
-                            : 'Sign In'}
-                  </button>
-                </form>
-              </div>
-            </div>
-        )}
+        <AuthModal
+            isOpen={showAuthModal}
+            userEmail={userEmail}
+            onUserEmailChange={setUserEmail}
+            onClose={() => setShowAuthModal(false)}
+        />
 
         {/* BARBELL PLATE CALCULATOR MODAL */}
-        {showPlateCalc && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-5">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-lg flex items-center gap-2">
-                    <Calculator className="w-5 h-5 text-blue-400" />
-                    Barbell Plate Calculator
-                  </h3>
-                  <button
-                      onClick={() => setShowPlateCalc(false)}
-                      className="p-1 text-slate-400 hover:text-white"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-400 font-semibold">Total Weight (kg)</label>
-                    <input
-                        type="number"
-                        value={plateCalcWeight}
-                        onChange={(e) => setPlateCalcWeight(e.target.value)}
-                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 font-semibold">Barbell Weight</label>
-                    <select
-                        value={barWeight}
-                        onChange={(e) => setBarWeight(Number(e.target.value))}
-                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value={20}>20 kg (Olympic)</option>
-                      <option value={15}>15 kg (Women&apos;s)</option>
-                      <option value={10}>10 kg (EZ Curl)</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* VISUAL BARBELLSLEEVE */}
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                  <p className="text-xs text-slate-400 text-center font-semibold">
-                    Load on <span className="text-blue-400 underline">EACH SIDE</span> of the bar:
-                  </p>
-
-                  <div className="flex items-center justify-center min-h-[110px] gap-1 py-2">
-                    {/* Barbell shaft + collar */}
-                    <div className="w-10 h-3 bg-slate-500 rounded-l" />
-                    <div className="w-3 h-10 bg-slate-400 rounded-sm" />
-
-                    {platesNeeded.length === 0 ? (
-                        <span className="text-xs text-slate-500 pl-3">Just the empty bar!</span>
-                    ) : (
-                        platesNeeded.map((p, idx) => (
-                            <div
-                                key={idx}
-                                className={`${p.color} px-2 rounded flex items-center justify-center font-bold text-xs shadow-md`}
-                            >
-                              {p.weight}
-                            </div>
-                        ))
-                    )}
-                  </div>
-
-                  {platesNeeded.length > 0 && (
-                      <div className="text-center text-xs text-slate-300 font-semibold pt-1 border-t border-slate-800">
-                        Per side: {platesNeeded.map((p) => `${p.weight}kg`).join(' + ')}
-                      </div>
-                  )}
-                </div>
-              </div>
-            </div>
-        )}
+        <PlateCalculatorModal
+            isOpen={showPlateCalc}
+            onClose={() => setShowPlateCalc(false)}
+        />
 
         {/* ROUTINE BUILDER MODAL */}
-        {showRoutineModal && (
-            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl p-5 space-y-4 max-h-[85vh] flex flex-col">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-lg">Create Routine Template</h3>
-                  <button
-                      onClick={() => setShowRoutineModal(false)}
-                      className="p-1 text-slate-400 hover:text-white"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <input
-                    type="text"
-                    placeholder="Routine Name (e.g., Push Day, Upper Body)..."
-                    value={draftRoutineName}
-                    onChange={(e) => setDraftRoutineName(e.target.value)}
-                    className="w-full bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-
-                <div className="overflow-y-auto space-y-3 flex-1 pr-1">
-                  {draftRoutineExercises.map((dex, exIdx) => (
-                      <div key={dex.id} className="bg-slate-800/60 rounded-xl p-3 space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="font-semibold text-sm text-blue-400">{dex.name}</span>
-                          <button
-                              onClick={() =>
-                                  setDraftRoutineExercises((prev) => prev.filter((item) => item.id !== dex.id))
-                              }
-                              className="text-slate-400 hover:text-red-400"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                        {dex.sets.map((st, sIdx) => (
-                            <div key={sIdx} className="grid grid-cols-7 gap-2 items-center text-xs">
-                              <span className="col-span-1 text-slate-400 font-bold">#{sIdx + 1}</span>
-                              <input
-                                  type="number"
-                                  placeholder="Target kg"
-                                  value={st.weight}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setDraftRoutineExercises((prev) =>
-                                        prev.map((item, i) =>
-                                            i === exIdx
-                                                ? {
-                                                  ...item,
-                                                  sets: item.sets.map((s, si) =>
-                                                      si === sIdx ? { ...s, weight: val } : s
-                                                  ),
-                                                }
-                                                : item
-                                        )
-                                    );
-                                  }}
-                                  className="col-span-3 bg-slate-900 rounded-lg px-2 py-1.5 text-center"
-                              />
-                              <input
-                                  type="number"
-                                  placeholder="Target reps"
-                                  value={st.reps}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setDraftRoutineExercises((prev) =>
-                                        prev.map((item, i) =>
-                                            i === exIdx
-                                                ? {
-                                                  ...item,
-                                                  sets: item.sets.map((s, si) =>
-                                                      si === sIdx ? { ...s, reps: val } : s
-                                                  ),
-                                                }
-                                                : item
-                                        )
-                                    );
-                                  }}
-                                  className="col-span-3 bg-slate-900 rounded-lg px-2 py-1.5 text-center"
-                              />
-                            </div>
-                        ))}
-                        <button
-                            onClick={() =>
-                                setDraftRoutineExercises((prev) =>
-                                    prev.map((item, i) =>
-                                        i === exIdx
-                                            ? { ...item, sets: [...item.sets, { weight: '', reps: '10' }] }
-                                            : item
-                                    )
-                                )
-                            }
-                            className="w-full bg-slate-800 hover:bg-slate-700 text-xs py-1.5 rounded-lg text-slate-300 font-semibold"
-                        >
-                          + Add Target Set
-                        </button>
-                      </div>
-                  ))}
-
-                  <button
-                      onClick={() => {
-                        setRoutinePickerMode(true);
-                        setShowExerciseModal(true);
-                      }}
-                      className="w-full border border-dashed border-slate-700 hover:border-blue-500 text-slate-300 py-2.5 rounded-xl text-sm font-semibold"
-                  >
-                    + Add Exercise to Routine
-                  </button>
-                </div>
-
-                <button
-                    onClick={handleSaveRoutine}
-                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-sm"
-                >
-                  Save Routine
-                </button>
-              </div>
-            </div>
-        )}
+        <RoutineBuilderModal
+            isOpen={showRoutineModal}
+            draftExercises={draftRoutineExercises}
+            setDraftExercises={setDraftRoutineExercises}
+            authHeaders={authHeaders}
+            onClose={() => setShowRoutineModal(false)}
+            onOpenExercisePicker={() => {
+              setRoutinePickerMode(true);
+              setShowExerciseModal(true);
+            }}
+            onRoutineSaved={fetchRoutines}
+        />
 
         {/* EXERCISE PICKER MODAL */}
-        {showExerciseModal && (
-            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl p-4 space-y-4 max-h-[80vh] flex flex-col">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-lg">Select Exercise ({filteredExercises.length})</h3>
-                  <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => setShowCreateExerciseModal(true)}
-                        className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-xs font-semibold px-3 py-1.5 rounded-lg"
-                    >
-                      + Create Custom
-                    </button>
-                    <button
-                        onClick={() => setShowExerciseModal(false)}
-                        className="p-1 text-slate-400 hover:text-white"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
-
-                <input
-                    type="text"
-                    placeholder="Search 50+ exercises or muscles (e.g. Squat, Back, Cable)..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-
-                <div className="overflow-y-auto space-y-2 flex-1 pr-1">
-                  {filteredExercises.map((ex) => (
-                      <button
-                          key={ex.id}
-                          onClick={() => {
-                            if (routinePickerMode) {
-                              setDraftRoutineExercises((prev) => [
-                                ...prev,
-                                {
-                                  id: crypto.randomUUID(),
-                                  exerciseId: ex.id,
-                                  name: ex.name,
-                                  sets: [
-                                    { weight: '', reps: '10' },
-                                    { weight: '', reps: '10' },
-                                    { weight: '', reps: '10' },
-                                  ],
-                                },
-                              ]);
-                              setShowExerciseModal(false);
-                              setSearchQuery('');
-                            } else {
-                              handleSelectExerciseForWorkout(ex);
-                            }
-                          }}
-                          className="w-full text-left bg-slate-800/60 hover:bg-slate-800 p-3 rounded-xl flex items-center justify-between transition"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-sm text-white">{ex.name}</p>
-                            {ex.isCustom && (
-                                <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
-                          Custom
-                        </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-slate-400">
-                            {ex.primaryMuscle} • {ex.equipment}
-                          </p>
-                        </div>
-                        <Plus className="w-4 h-4 text-blue-400" />
-                      </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-        )}
+        <ExercisePickerModal
+            isOpen={showExerciseModal}
+            exercises={dbExercises}
+            onClose={() => setShowExerciseModal(false)}
+            onOpenCreateCustom={() => setShowCreateExerciseModal(true)}
+            onSelectExercise={(ex) => {
+              if (routinePickerMode) {
+                setDraftRoutineExercises((prev) => [
+                  ...prev,
+                  {
+                    id: crypto.randomUUID(),
+                    exerciseId: ex.id,
+                    name: ex.name,
+                    sets: [
+                      { weight: '', reps: '10' },
+                      { weight: '', reps: '10' },
+                      { weight: '', reps: '10' },
+                    ],
+                  },
+                ]);
+                setShowExerciseModal(false);
+              } else {
+                handleSelectExerciseForWorkout(ex);
+              }
+            }}
+        />
 
         {/* CREATE CUSTOM EXERCISE MODAL */}
-        {showCreateExerciseModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-lg">Create Custom Exercise</h3>
-                  <button
-                      onClick={() => setShowCreateExerciseModal(false)}
-                      className="p-1 text-slate-400 hover:text-white"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-slate-400 font-semibold">Exercise Name</label>
-                    <input
-                        type="text"
-                        placeholder="e.g., Pendulum Squat"
-                        value={customExName}
-                        onChange={(e) => setCustomExName(e.target.value)}
-                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-slate-400 font-semibold">Primary Muscle Group</label>
-                    <select
-                        value={customExMuscle}
-                        onChange={(e) => setCustomExMuscle(e.target.value)}
-                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      {MUSCLE_GROUPS.map((m) => (
-                          <option key={m} value={m}>
-                            {m}
-                          </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-slate-400 font-semibold">Equipment</label>
-                    <select
-                        value={customExEquipment}
-                        onChange={(e) => setCustomExEquipment(e.target.value)}
-                        className="w-full mt-1 bg-slate-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      {EQUIPMENT_TYPES.map((eq) => (
-                          <option key={eq} value={eq}>
-                            {eq}
-                          </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <button
-                    onClick={handleCreateCustomExercise}
-                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-sm"
-                >
-                  Save Exercise
-                </button>
-              </div>
-            </div>
-        )}
+        <CreateExerciseModal
+            isOpen={showCreateExerciseModal}
+            authHeaders={authHeaders}
+            onClose={() => setShowCreateExerciseModal(false)}
+            onCreated={(created) => {
+              fetchExercises();
+              if (!routinePickerMode && isActive) {
+                handleSelectExerciseForWorkout(created);
+              }
+            }}
+        />
       </div>
   );
 }
