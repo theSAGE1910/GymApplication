@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getAuthenticatedUser } from '@/lib/supabase';
+import { getAuthenticatedUser } from '@/lib/auth';
+import { calculateEstimated1Rm } from "@/utils/calculations";
 
 export async function GET(req: Request) {
     try {
@@ -30,7 +31,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        const { workoutName, startTime, exercises } = body;
+        const { workoutName, routineId, startTime, exercises } = body;
         const user = await getAuthenticatedUser(req);
 
         let totalVolume = 0;
@@ -52,9 +53,12 @@ export async function POST(req: Request) {
                         workout: { userId: user.id },
                     },
                 },
-                select: { weight: true, estimated1Rm: true },
+                select: { weight: true, reps:true, estimated1Rm: true },
             });
 
+            let maxHistoricalVolume = historicalSets.reduce(
+                (max, s) => Math.max(max, (s.weight || 0) * (s.reps || 0)),
+                0);
             let maxHistoricalWeight = historicalSets.reduce(
                 (max, s) => Math.max(max, s.weight || 0),
                 0
@@ -69,16 +73,21 @@ export async function POST(req: Request) {
                 const reps = parseInt(s.reps, 10) || 0;
                 const rpe = s.rpe ? parseFloat(s.rpe) : null;
 
+                const setVolume = weight * reps;
                 totalVolume += weight * reps;
                 totalSets += 1;
 
-                const estimated1Rm =
-                    weight > 0 && reps > 0 ? Number((weight * (1 + reps / 30)).toFixed(1)) : null;
+                const estimated1Rm = calculateEstimated1Rm(weight, reps);
 
                 // Check if this set beats the all-time Weight PR or 1RM PR
+                let isVolumePr = false;
                 let isWeightPr = false;
                 let is1RmPr = false;
 
+                if (setVolume > 0 && setVolume > maxHistoricalVolume) {
+                    isVolumePr = true;
+                    maxHistoricalVolume = setVolume;
+                }
                 if (weight > 0 && weight > maxHistoricalWeight) {
                     isWeightPr = true;
                     maxHistoricalWeight = weight;
@@ -96,6 +105,7 @@ export async function POST(req: Request) {
                     rpe,
                     isCompleted: true,
                     estimated1Rm,
+                    isVolumePr,
                     isWeightPr,
                     is1RmPr,
                 };
@@ -122,6 +132,7 @@ export async function POST(req: Request) {
             data: {
                 userId: user.id,
                 name: workoutName || 'Workout Session',
+                routineId: routineId || null,
                 startTime: new Date(startTime || Date.now()),
                 endTime: new Date(),
                 totalVolume,
@@ -142,11 +153,14 @@ export async function POST(req: Request) {
 // DELETE: Remove a past workout by ?id=...
 export async function DELETE(req: Request) {
     try {
+        const user = await getAuthenticatedUser(req);
         const { searchParams } = new URL(req.url);
         const id = searchParams.get('id');
         if (!id) return NextResponse.json({ error: 'Missing workout id' }, { status: 400 });
 
-        await prisma.workout.delete({ where: { id } });
+        await prisma.workout.deleteMany({ where: {
+            id, userId: user.id },
+        });
         return NextResponse.json({ success: true });
     } catch (error) {
         console.error('Error deleting workout:', error);

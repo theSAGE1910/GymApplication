@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getAuthenticatedUser } from '@/lib/supabase';
+import { getAuthenticatedUser } from '@/lib/auth';
 
 export async function GET(req: Request) {
     try {
@@ -72,11 +72,14 @@ export async function POST(req: Request) {
 // DELETE: Remove a routine by ?id=...
 export async function DELETE(req: Request) {
     try {
+        const user = await getAuthenticatedUser(req);
         const { searchParams } = new URL(req.url);
         const id = searchParams.get('id');
         if (!id) return NextResponse.json({ error: 'Missing routine id' }, { status: 400 });
 
-        await prisma.routine.delete({ where: { id } });
+        await prisma.routine.deleteMany({
+            where: { id, userId: user.id },
+        });
         return NextResponse.json({ success: true });
     } catch (error) {
         console.error('Error deleting routine:', error);
