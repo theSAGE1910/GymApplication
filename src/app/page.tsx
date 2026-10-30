@@ -45,6 +45,7 @@ import {
 export default function HevyCloneApp() {
   const {
     isActive,
+    routineId,
     workoutName,
     startTime,
     restEndTime,
@@ -122,7 +123,7 @@ export default function HevyCloneApp() {
   );
 
   const fetchExercises = useCallback(() => {
-    fetch('/api/exercises')
+    fetch('/api/exercises', { headers: authHeaders() })
         .then((res) => res.json())
         .then((data) => {
           if (Array.isArray(data)) {
@@ -132,7 +133,7 @@ export default function HevyCloneApp() {
             }
           }
         });
-  }, [selectedAnalyticsExId]);
+  }, [selectedAnalyticsExId, authHeaders]);
 
   const fetchRoutines = useCallback(() => {
     fetch('/api/routines', { headers: authHeaders() })
@@ -381,7 +382,7 @@ export default function HevyCloneApp() {
       const res = await fetch('/api/workouts', {
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ workoutName, startTime, exercises }),
+        body: JSON.stringify({ workoutName, routineId, startTime, exercises }),
       });
       if (res.ok) {
         discardWorkout();
